@@ -524,7 +524,7 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 	private function applyDiaryCategoryIcons(\DOMDocument $dom): bool
 	{
 		$xpath = new \DOMXPath($dom);
-		$anchors = $xpath->query("//a[contains(@href, 'option=com_ra_events') and contains(@href, 'view=event')]");
+		$anchors = $xpath->query("//a[contains(@href, 'option=com_ra_events') and contains(@href, 'view=event') and not(@class)]");
 
 		if (!$anchors instanceof \DOMNodeList || $anchors->length === 0) {
 			return false;
