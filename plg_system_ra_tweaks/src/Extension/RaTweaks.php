@@ -10,6 +10,7 @@ namespace Ramblerseastcheshire\Plugin\System\RaTweaks\Extension;
 \defined('_JEXEC') or die;
 
 use Joomla\CMS\Application\CMSApplicationInterface;
+use Joomla\CMS\Document\HtmlDocument;
 use Joomla\CMS\Factory;
 use Joomla\CMS\Menu\AdministratorMenuItem;
 use Joomla\CMS\Plugin\CMSPlugin;
@@ -33,7 +34,81 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 		return [
 			'onPreprocessMenuItems' => 'onPreprocessMenuItems',
 			'onAfterRender' => 'onAfterRender',
+			'onBeforeCompileHead' => 'onBeforeCompileHead',
 		];
+	}
+
+	/**
+	 * Links from the Ramblers Tools app end in #walk=<id>. Add a small script that opens that
+	 * walk's details on the page, as if it had been clicked. The part after # never reaches the
+	 * server, so the script goes on every site page and does nothing without it.
+	 */
+	public function onBeforeCompileHead(): void
+	{
+		if (!$this->app->isClient('site') || !(bool) $this->params->get('walk_links', 1)) {
+			return;
+		}
+
+		$document = $this->app->getDocument();
+
+		if (!$document instanceof HtmlDocument) {
+			return;
+		}
+
+		$document->getWebAssetManager()->addInlineScript($this->walkLinkScript(), [], ['id' => 'plg-system-ra_tweaks-walk-link']);
+	}
+
+	private function walkLinkScript(): string
+	{
+		return <<<'JS'
+(function() {
+	"use strict";
+
+	var match = /^#walk=(\d+)$/.exec(window.location.hash);
+
+	if (!match) {
+		return;
+	}
+
+	var id = match[1];
+	var tries = 0;
+
+	// The walks library draws each walk with onclick="ra.walk.displayWalkID(event,'<id>')".
+	// The walks load after the page, so keep looking for about 15 seconds.
+	function findWalk() {
+		var links = document.querySelectorAll("[onclick*='displayWalkID']");
+
+		for (var i = 0; i < links.length; i++) {
+			var onclick = links[i].getAttribute("onclick") || "";
+
+			if (onclick.indexOf("'" + id + "'") !== -1 || onclick.indexOf('"' + id + '"') !== -1) {
+				return links[i];
+			}
+		}
+
+		return null;
+	}
+
+	function openWalk() {
+		var link = findWalk();
+
+		if (link) {
+			link.click();
+			return;
+		}
+
+		if (++tries < 60) {
+			window.setTimeout(openWalk, 250);
+		}
+	}
+
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", openWalk);
+	} else {
+		openWalk();
+	}
+})();
+JS;
 	}
 
 	/**
