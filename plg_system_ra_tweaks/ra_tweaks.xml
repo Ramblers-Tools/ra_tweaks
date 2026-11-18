@@ -232,6 +232,18 @@
 					showon="walk_routes:1"
 				/>
 				<field
+					name="routes_default_map"
+					type="list"
+					label="PLG_SYSTEM_RA_TWEAKS_FIELD_ROUTES_DEFAULT_MAP_LABEL"
+					description="PLG_SYSTEM_RA_TWEAKS_FIELD_ROUTES_DEFAULT_MAP_DESC"
+					default="Ordnance Survey"
+					showon="walk_routes:1"
+				>
+					<option value="Ordnance Survey">Ordnance Survey</option>
+					<option value="Open Topo Map">Open Topo Map</option>
+					<option value="Open Street Map">Open Street Map</option>
+				</field>
+				<field
 					name="routes_max_mb"
 					type="number"
 					label="PLG_SYSTEM_RA_TWEAKS_FIELD_ROUTES_MAX_MB_LABEL"
