@@ -175,13 +175,17 @@ final class WalkRoutes
 	}
 
 	/**
-	 * A file with no timestamps makes the library print "Actual Time: 0hrs 0mins". Remove that line.
+	 * Tidies the figures the library prints above the map: removes "Actual Time: 0hrs 0mins" (a file
+	 * with no timestamps) and adds feet after the metres for the altitudes and the climb.
 	 */
 	private function hideEmptyTimeScript(): string
 	{
 		return '<script>(function(){var n=0,t=window.setInterval(function(){'
 			. 'var d=document.querySelector("[leaflet-browser-print-pages]");'
-			. 'if(d&&d.innerHTML.indexOf("Actual Time")!==-1){d.innerHTML=d.innerHTML.replace(/<b>Actual Time:<\\/b>\\s*0hrs 0mins\\s*<br\\s*\\/?>/i,"");window.clearInterval(t);}'
+			. 'if(d&&d.innerHTML.indexOf("Distance")!==-1){var h=d.innerHTML;'
+			. 'h=h.replace(/<b>Actual Time:<\\/b>\\s*0hrs 0mins\\s*<br\\s*\\/?>/i,"");'
+			. 'h=h.replace(/(<b>(?:Min Altitude|Max Altitude|Elevation Gain):<\\/b>\\s*)(-?\\d+) m(?! \\/)/g,function(m,a,v){return a+v+" m / "+Math.round(v*3.28084)+" ft";});'
+			. 'd.innerHTML=h;window.clearInterval(t);}'
 			. 'else if(++n>100){window.clearInterval(t);}},200);})();</script>';
 	}
 
