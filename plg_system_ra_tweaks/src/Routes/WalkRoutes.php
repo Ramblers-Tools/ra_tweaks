@@ -175,18 +175,114 @@ final class WalkRoutes
 	}
 
 	/**
-	 * Tidies the figures the library prints above the map: removes "Actual Time: 0hrs 0mins" (a file
-	 * with no timestamps) and adds feet after the metres for the altitudes and the climb.
+	 * Tidies the figures the library prints above the map and the elevation graph:
+	 *  - removes "Actual Time: 0hrs 0mins" (a file with no timestamps);
+	 *  - adds feet after the metres for the altitudes and the climb;
+	 *  - redraws the graph's height scale in feet (the library only labels it in metres, and its
+	 *    "m" label overlaps the top figure), with Feet / Metres buttons to switch.
+	 * The library draws the graph once, as an SVG copy in the page, so its scale is relabelled in
+	 * place: the plotted shape is the same in either unit.
 	 */
 	private function hideEmptyTimeScript(): string
 	{
-		return '<script>(function(){var n=0,t=window.setInterval(function(){'
-			. 'var d=document.querySelector("[leaflet-browser-print-pages]");'
-			. 'if(d&&d.innerHTML.indexOf("Distance")!==-1){var h=d.innerHTML;'
-			. 'h=h.replace(/<b>Actual Time:<\\/b>\\s*0hrs 0mins\\s*<br\\s*\\/?>/i,"");'
-			. 'h=h.replace(/(<b>(?:Min Altitude|Max Altitude|Elevation Gain):<\\/b>\\s*)(-?\\d+) m(?! \\/)/g,function(m,a,v){return a+v+" m / "+Math.round(v*3.28084)+" ft";});'
-			. 'd.innerHTML=h;window.clearInterval(t);}'
-			. 'else if(++n>100){window.clearInterval(t);}},200);})();</script>';
+		return '<script>' . <<<'JS'
+(function(){
+	var tries = 0;
+	var timer = window.setInterval(function() {
+		var page = document.querySelector("[leaflet-browser-print-pages]");
+
+		if (!page || page.innerHTML.indexOf("Distance") === -1) {
+			if (++tries > 100) { window.clearInterval(timer); }
+			return;
+		}
+
+		window.clearInterval(timer);
+
+		var html = page.innerHTML;
+		html = html.replace(/<b>Actual Time:<\/b>\s*0hrs 0mins\s*<br\s*\/?>/i, "");
+		html = html.replace(/(<b>(?:Min Altitude|Max Altitude|Elevation Gain):<\/b>\s*)(-?\d+) m(?! \/)/g, function(m, a, v) {
+			return a + v + " m / " + Math.round(v * 3.28084) + " ft";
+		});
+		page.innerHTML = html;
+
+		units(page);
+	}, 200);
+
+	function units(page) {
+		var holder = page.querySelector(".elevation");
+		var svg = holder && holder.querySelector("svg");
+		var axis = svg && svg.querySelector(".y.axis");
+		var ticks = axis ? axis.querySelectorAll(".tick") : [];
+
+		if (!window.d3 || ticks.length < 2) {
+			return;
+		}
+
+		function ty(g) {
+			return parseFloat(/,\s*([-0-9.e]+)\)/.exec(g.getAttribute("transform"))[1]);
+		}
+
+		var y1 = ty(ticks[0]), y2 = ty(ticks[1]);
+		var v1 = parseFloat(ticks[0].textContent), v2 = parseFloat(ticks[1].textContent);
+		var slope = (y2 - y1) / (v2 - v1);
+		var offset = y1 - slope * v1;
+		var domainPath = axis.querySelector(".domain");
+		var height = domainPath ? parseFloat((/V([0-9.]+)/.exec(domainPath.getAttribute("d")) || [0, 85])[1]) : 85;
+		var low = (height - offset) / slope;
+		var high = (0 - offset) / slope;
+
+		// Room above the scale for the unit label, so it never sits on the top figure.
+		var group = svg.querySelector("g");
+		var move = /translate\(\s*([-0-9.]+)[ ,]+([-0-9.]+)\s*\)/.exec(group.getAttribute("transform") || "");
+
+		if (move) {
+			group.setAttribute("transform", "translate(" + move[1] + "," + (parseFloat(move[2]) + 12) + ")");
+			svg.setAttribute("height", parseFloat(svg.getAttribute("height")) + 12);
+		}
+
+		function draw(feet) {
+			var factor = feet ? 3.28084 : 1;
+			var scale = d3.scale.linear().domain([low * factor, high * factor]).range([height, 0]);
+			var node = d3.select(axis);
+
+			node.selectAll("*").remove();
+			node.call(d3.svg.axis().scale(scale).ticks(3).orient("left"));
+			node.append("text").attr("x", -9).attr("y", -9).style("text-anchor", "end").text(feet ? "ft" : "m");
+		}
+
+		var bar = document.createElement("div");
+		bar.className = "ra-tweaks-elevation-units";
+		bar.setAttribute("role", "group");
+		bar.setAttribute("aria-label", "Elevation units");
+		bar.style.cssText = "margin:0.5em 0 0.25em;display:flex;gap:0.4em;";
+
+		var buttons = [];
+
+		[["Feet", true], ["Metres", false]].forEach(function(item) {
+			var button = document.createElement("button");
+			button.type = "button";
+			button.textContent = item[0];
+			button.addEventListener("click", function() { choose(item[1]); });
+			bar.appendChild(button);
+			buttons.push([button, item[1]]);
+		});
+
+		function choose(feet) {
+			draw(feet);
+
+			buttons.forEach(function(pair) {
+				var on = pair[1] === feet;
+				pair[0].setAttribute("aria-pressed", on ? "true" : "false");
+				pair[0].style.cssText = "font:inherit;font-size:0.875em;font-weight:600;cursor:pointer;border-radius:999px;padding:0.15em 0.9em;border:1px solid #214d3c;"
+					+ (on ? "background:#214d3c;color:#fff;" : "background:#fff;color:#214d3c;");
+			});
+		}
+
+		holder.parentNode.insertBefore(bar, holder);
+		choose(true);
+	}
+})();
+JS . '</script>';
 	}
 
 	/**
