@@ -236,10 +236,11 @@
 					type="list"
 					label="PLG_SYSTEM_RA_TWEAKS_FIELD_ROUTES_DEFAULT_MAP_LABEL"
 					description="PLG_SYSTEM_RA_TWEAKS_FIELD_ROUTES_DEFAULT_MAP_DESC"
-					default="Ordnance Survey"
+					default="OS Explorer/Landranger"
 					showon="walk_routes:1"
 				>
-					<option value="Ordnance Survey">Ordnance Survey</option>
+					<option value="OS Explorer/Landranger">OS Explorer/Landranger</option>
+					<option value="Ordnance Survey">Ordnance Survey (vector)</option>
 					<option value="Open Topo Map">Open Topo Map</option>
 					<option value="Open Street Map">Open Street Map</option>
 				</field>

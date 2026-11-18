@@ -178,10 +178,12 @@ final class WalkRoutes
 	 * The library always opens its maps on OpenStreetMap, so after the map is drawn pick the
 	 * chosen layer in the map's own layer control, as a visitor would. Does nothing if that
 	 * layer is not on offer (the library only adds the Ordnance Survey ones when it has a key).
+	 * The Explorer/Landranger map stops at a fixed zoom, so for a very short route the map is
+	 * zoomed in too far, the layer control greys that choice out, and the OS vector map is used.
 	 */
 	private function defaultMapScript(): string
 	{
-		$layer = trim((string) $this->params->get('routes_default_map', 'Ordnance Survey'));
+		$layer = trim((string) $this->params->get('routes_default_map', 'OS Explorer/Landranger'));
 
 		if ($layer === '' || $layer === 'Open Street Map') {
 			return '';
@@ -189,10 +191,12 @@ final class WalkRoutes
 
 		$name = json_encode($layer, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 
-		return '<script>(function(){var want=' . $name . ',tries=0;function pick(){'
-			. 'var labels=document.querySelectorAll(".leaflet-control-layers-base label");'
-			. 'for(var i=0;i<labels.length;i++){if(labels[i].textContent.trim()===want){'
-			. 'var input=labels[i].querySelector("input");if(input&&!input.checked){input.click();}return;}}'
+		return '<script>(function(){var want=' . $name . ',tries=0;'
+			. 'function find(n){var labels=document.querySelectorAll(".leaflet-control-layers-base label");'
+			. 'for(var i=0;i<labels.length;i++){if(labels[i].textContent.trim()===n){return labels[i].querySelector("input");}}return null;}'
+			. 'function pick(){var input=find(want);'
+			. 'if(input&&!input.disabled){if(!input.checked){input.click();}return;}'
+			. 'if(input&&tries>=12){var other=find("Ordnance Survey");if(other&&!other.disabled&&want!=="Ordnance Survey"){other.click();}return;}'
 			. 'if(++tries<40){window.setTimeout(pick,250);}}'
 			. 'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",pick);}else{pick();}})();</script>';
 	}
