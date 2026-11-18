@@ -16,6 +16,7 @@ use Joomla\CMS\Menu\AdministratorMenuItem;
 use Joomla\CMS\Plugin\CMSPlugin;
 use Joomla\Database\DatabaseInterface;
 use Joomla\Event\SubscriberInterface;
+use Ramblerseastcheshire\Plugin\System\RaTweaks\Routes\WalkRoutes;
 
 /**
  * Colours changed Ramblers walk items in the final rendered page output.
@@ -35,6 +36,8 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 			'onPreprocessMenuItems' => 'onPreprocessMenuItems',
 			'onAfterRender' => 'onAfterRender',
 			'onBeforeCompileHead' => 'onBeforeCompileHead',
+			'onContentPrepare' => 'onContentPrepare',
+			'onAjaxRa_tweaks' => 'onAjaxRa_tweaks',
 		];
 	}
 
@@ -45,7 +48,7 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 	 */
 	public function onBeforeCompileHead(): void
 	{
-		if (!$this->app->isClient('site') || !(bool) $this->params->get('walk_links', 1)) {
+		if (!$this->app->isClient('site')) {
 			return;
 		}
 
@@ -55,7 +58,75 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 			return;
 		}
 
-		$document->getWebAssetManager()->addInlineScript($this->walkLinkScript(), [], ['id' => 'plg-system-ra_tweaks-walk-link']);
+		$assets = $document->getWebAssetManager();
+
+		if ((bool) $this->params->get('walk_links', 1)) {
+			$assets->addInlineScript($this->walkLinkScript(), [], ['id' => 'plg-system-ra_tweaks-walk-link']);
+		}
+
+		$routes = $this->walkRoutes();
+
+		if ($routes->enabled()) {
+			$config = json_encode($routes->scriptConfig(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
+			$assets->addInlineScript('window.raTweaksRoutes = ' . $config . ';' . "\n" . $this->walkRouteButtonScript(), [], ['id' => 'plg-system-ra_tweaks-walk-routes']);
+		}
+	}
+
+	private function walkRoutes(): WalkRoutes
+	{
+		return new WalkRoutes($this->params, $this->app, Factory::getContainer()->get(DatabaseInterface::class));
+	}
+
+	/**
+	 * Replace {ra_walk_route_upload} and {ra_walk_route} in articles with the route pages.
+	 *
+	 * @param mixed $eventOrContext Joomla 5 event object, or the context string on Joomla 4.4
+	 * @param mixed $item           The article (or other item) being prepared
+	 */
+	public function onContentPrepare($eventOrContext, &$item = null): void
+	{
+		if (!$this->app->isClient('site')) {
+			return;
+		}
+
+		if (\is_object($eventOrContext) && method_exists($eventOrContext, 'getItem')) {
+			$item = $eventOrContext->getItem();
+		} elseif (\is_object($eventOrContext) && method_exists($eventOrContext, 'getArgument')) {
+			$item = $eventOrContext->getArgument('subject') ?? $eventOrContext->getArgument(1);
+		}
+
+		if (!\is_object($item) || !isset($item->text) || !\is_string($item->text)) {
+			return;
+		}
+
+		$item->text = $this->walkRoutes()->replaceShortcodes($item->text);
+	}
+
+	/**
+	 * com_ajax task=routes returns the walks that have a route, for the walk popup button.
+	 *
+	 * @param mixed $event
+	 */
+	public function onAjaxRa_tweaks($event = null)
+	{
+		if (!$this->app->isClient('site')) {
+			return null;
+		}
+
+		$routes = $this->walkRoutes();
+		$result = '{}';
+
+		if ($routes->enabled() && $this->app->getInput()->getCmd('task', '') === 'routes') {
+			$result = $routes->lookupJson();
+		}
+
+		if (\is_object($event) && method_exists($event, 'addResult')) {
+			$event->addResult($result);
+
+			return null;
+		}
+
+		return $result;
 	}
 
 	private function walkLinkScript(): string
@@ -106,6 +177,156 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 		document.addEventListener("DOMContentLoaded", openWalk);
 	} else {
 		openWalk();
+	}
+})();
+JS;
+	}
+
+	/**
+	 * Adds View route / Download GPX buttons to a walk's popup when the walk has a route.
+	 * Wraps ra.walk.displayWalkID (the Ramblers library) to learn which walk is opening, then
+	 * adds the buttons next to Print and Close once the popup has been drawn.
+	 */
+	private function walkRouteButtonScript(): string
+	{
+		return <<<'JS'
+(function() {
+	"use strict";
+
+	var cfg = window.raTweaksRoutes;
+
+	if (!cfg) {
+		return;
+	}
+
+	var routes = null;
+	var loading = false;
+	var waiting = [];
+
+	function loadRoutes(done) {
+		if (routes !== null) {
+			done();
+			return;
+		}
+
+		waiting.push(done);
+
+		if (loading) {
+			return;
+		}
+
+		loading = true;
+
+		var request = new XMLHttpRequest();
+		request.open("GET", cfg.lookup, true);
+		request.onreadystatechange = function() {
+			if (request.readyState !== 4) {
+				return;
+			}
+
+			try {
+				routes = JSON.parse(request.responseText) || {};
+			} catch (e) {
+				routes = {};
+			}
+
+			var callbacks = waiting;
+			waiting = [];
+			callbacks.forEach(function(callback) { callback(); });
+		};
+		request.send();
+	}
+
+	function makeButton(text, href, download) {
+		var link = document.createElement("a");
+		link.className = "link-button tiny cloudy ra-tweaks-route-button";
+		link.textContent = text;
+		link.href = href;
+
+		if (download) {
+			link.setAttribute("download", "");
+		}
+
+		link.style.marginRight = "0.5em";
+
+		return link;
+	}
+
+	function addButtons(id) {
+		var file = routes && routes[id];
+
+		if (!file) {
+			return;
+		}
+
+		var header = document.querySelector(".js-modal .ra-modal-header");
+
+		if (!header || header.querySelector(".ra-tweaks-route-button")) {
+			return;
+		}
+
+		var first = header.firstChild;
+
+		if (cfg.page) {
+			var sep = cfg.page.indexOf("?") === -1 ? "?" : "&";
+			header.insertBefore(makeButton("View route", cfg.page + sep + "walk=" + encodeURIComponent(id), false), first);
+		}
+
+		header.insertBefore(makeButton("Download GPX", cfg.folder + encodeURIComponent(file), true), first);
+	}
+
+	function whenPopupReady(id, tries) {
+		var header = document.querySelector(".js-modal .ra-modal-header");
+
+		if (header) {
+			addButtons(id);
+			return;
+		}
+
+		if (tries < 40) {
+			window.setTimeout(function() { whenPopupReady(id, tries + 1); }, 100);
+		}
+	}
+
+	function wrap() {
+		if (!window.ra || !ra.walk || typeof ra.walk.displayWalkID !== "function") {
+			return false;
+		}
+
+		if (ra.walk.displayWalkID.raTweaksWrapped) {
+			return true;
+		}
+
+		var original = ra.walk.displayWalkID;
+		var wrapped = function(event, id) {
+			var result = original.apply(this, arguments);
+			var walkId = String(id);
+			loadRoutes(function() { whenPopupReady(walkId, 0); });
+			return result;
+		};
+
+		wrapped.raTweaksWrapped = true;
+		ra.walk.displayWalkID = wrapped;
+
+		return true;
+	}
+
+	var attempts = 0;
+
+	function start() {
+		if (wrap()) {
+			return;
+		}
+
+		if (++attempts < 120) {
+			window.setTimeout(start, 250);
+		}
+	}
+
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", start);
+	} else {
+		start();
 	}
 })();
 JS;
