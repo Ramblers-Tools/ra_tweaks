@@ -10,11 +10,13 @@ namespace Ramblerseastcheshire\Plugin\System\RaTweaks\Extension;
 \defined('_JEXEC') or die;
 
 use Joomla\CMS\Application\CMSApplicationInterface;
+use Joomla\CMS\Document\HtmlDocument;
 use Joomla\CMS\Factory;
 use Joomla\CMS\Menu\AdministratorMenuItem;
 use Joomla\CMS\Plugin\CMSPlugin;
 use Joomla\Database\DatabaseInterface;
 use Joomla\Event\SubscriberInterface;
+use Ramblerseastcheshire\Plugin\System\RaTweaks\Routes\WalkRoutes;
 
 /**
  * Colours changed Ramblers walk items in the final rendered page output.
@@ -33,7 +35,363 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 		return [
 			'onPreprocessMenuItems' => 'onPreprocessMenuItems',
 			'onAfterRender' => 'onAfterRender',
+			'onBeforeCompileHead' => 'onBeforeCompileHead',
+			'onContentPrepare' => 'onContentPrepare',
+			'onAjaxRa_tweaks' => 'onAjaxRa_tweaks',
 		];
+	}
+
+	/**
+	 * Links from the Ramblers Tools app end in #walk=<id>. Add a small script that opens that
+	 * walk's details on the page, as if it had been clicked. The part after # never reaches the
+	 * server, so the script goes on every site page and does nothing without it.
+	 */
+	public function onBeforeCompileHead(): void
+	{
+		if (!$this->app->isClient('site')) {
+			return;
+		}
+
+		$document = $this->app->getDocument();
+
+		if (!$document instanceof HtmlDocument) {
+			return;
+		}
+
+		$assets = $document->getWebAssetManager();
+
+		if ((bool) $this->params->get('walk_links', 1)) {
+			$assets->addInlineScript($this->walkLinkScript(), [], ['id' => 'plg-system-ra_tweaks-walk-link']);
+		}
+
+		$routes = $this->walkRoutes();
+
+		if ($routes->enabled()) {
+			$config = json_encode($routes->scriptConfig(), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
+			$assets->addInlineScript('window.raTweaksRoutes = ' . $config . ';' . "\n" . $this->walkRouteButtonScript(), [], ['id' => 'plg-system-ra_tweaks-walk-routes']);
+		}
+	}
+
+	private function walkRoutes(): WalkRoutes
+	{
+		return new WalkRoutes($this->params, $this->app, Factory::getContainer()->get(DatabaseInterface::class));
+	}
+
+	/**
+	 * Replace {ra_walk_route_upload} and {ra_walk_route} in articles with the route pages.
+	 *
+	 * @param mixed $eventOrContext Joomla 5 event object, or the context string on Joomla 4.4
+	 * @param mixed $item           The article (or other item) being prepared
+	 */
+	public function onContentPrepare($eventOrContext, &$item = null): void
+	{
+		if (!$this->app->isClient('site')) {
+			return;
+		}
+
+		if (\is_object($eventOrContext) && method_exists($eventOrContext, 'getItem')) {
+			$item = $eventOrContext->getItem();
+		} elseif (\is_object($eventOrContext) && method_exists($eventOrContext, 'getArgument')) {
+			$item = $eventOrContext->getArgument('subject') ?? $eventOrContext->getArgument(1);
+		}
+
+		if (!\is_object($item) || !isset($item->text) || !\is_string($item->text)) {
+			return;
+		}
+
+		$item->text = $this->walkRoutes()->replaceShortcodes($item->text);
+	}
+
+	/**
+	 * com_ajax task=routes returns the walks that have a route, for the walk popup button.
+	 *
+	 * @param mixed $event
+	 */
+	public function onAjaxRa_tweaks($event = null)
+	{
+		if (!$this->app->isClient('site')) {
+			return null;
+		}
+
+		$routes = $this->walkRoutes();
+		$result = '{}';
+
+		if ($routes->enabled() && $this->app->getInput()->getCmd('task', '') === 'routes') {
+			$result = $routes->lookupJson();
+		}
+
+		if (\is_object($event) && method_exists($event, 'addResult')) {
+			$event->addResult($result);
+
+			return null;
+		}
+
+		return $result;
+	}
+
+	private function walkLinkScript(): string
+	{
+		return <<<'JS'
+(function() {
+	"use strict";
+
+	var match = /^#walk=(\d+)$/.exec(window.location.hash);
+
+	if (!match) {
+		return;
+	}
+
+	var id = match[1];
+	var tries = 0;
+
+	// The walks library draws each walk with onclick="ra.walk.displayWalkID(event,'<id>')".
+	// The walks load after the page, so keep looking for about 15 seconds.
+	function findWalk() {
+		var links = document.querySelectorAll("[onclick*='displayWalkID']");
+
+		for (var i = 0; i < links.length; i++) {
+			var onclick = links[i].getAttribute("onclick") || "";
+
+			if (onclick.indexOf("'" + id + "'") !== -1 || onclick.indexOf('"' + id + '"') !== -1) {
+				return links[i];
+			}
+		}
+
+		return null;
+	}
+
+	function openWalk() {
+		var link = findWalk();
+
+		if (link) {
+			link.click();
+			return;
+		}
+
+		if (++tries < 60) {
+			window.setTimeout(openWalk, 250);
+		}
+	}
+
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", openWalk);
+	} else {
+		openWalk();
+	}
+})();
+JS;
+	}
+
+	/**
+	 * Adds View route / Download GPX buttons to a walk's popup when the walk has a route.
+	 * Wraps ra.walk.displayWalkID (the Ramblers library) to learn which walk is opening, then
+	 * adds the buttons next to Print and Close once the popup has been drawn.
+	 */
+	private function walkRouteButtonScript(): string
+	{
+		return <<<'JS'
+(function() {
+	"use strict";
+
+	var cfg = window.raTweaksRoutes;
+
+	if (!cfg) {
+		return;
+	}
+
+	var routes = null;
+	var loading = false;
+	var waiting = [];
+
+	function loadRoutes(done) {
+		if (routes !== null) {
+			done();
+			return;
+		}
+
+		waiting.push(done);
+
+		if (loading) {
+			return;
+		}
+
+		loading = true;
+
+		var request = new XMLHttpRequest();
+		request.open("GET", cfg.lookup, true);
+		request.onreadystatechange = function() {
+			if (request.readyState !== 4) {
+				return;
+			}
+
+			try {
+				routes = JSON.parse(request.responseText) || {};
+			} catch (e) {
+				routes = {};
+			}
+
+			var callbacks = waiting;
+			waiting = [];
+			callbacks.forEach(function(callback) { callback(); });
+		};
+		request.send();
+	}
+
+	var KEY = "raTweaksReopenWalk";
+
+	function remember(id) {
+		try {
+			window.sessionStorage.setItem(KEY, JSON.stringify({id: id, url: window.location.href.split("#")[0], at: Date.now()}));
+		} catch (e) {}
+	}
+
+	function forget() {
+		try {
+			window.sessionStorage.removeItem(KEY);
+		} catch (e) {}
+	}
+
+	function makeButton(text, href, download) {
+		var link = document.createElement("a");
+		link.className = "link-button tiny cloudy ra-tweaks-route-button";
+		link.textContent = text;
+		link.href = href;
+
+		if (download) {
+			link.setAttribute("download", "");
+		}
+
+		link.style.marginRight = "0.5em";
+
+		return link;
+	}
+
+	function addButtons(id) {
+		var file = routes && routes[id];
+
+		if (!file) {
+			return;
+		}
+
+		var header = document.querySelector(".js-modal .ra-modal-header");
+
+		if (!header || header.querySelector(".ra-tweaks-route-button")) {
+			return;
+		}
+
+		var first = header.firstChild;
+
+		if (cfg.page) {
+			var sep = cfg.page.indexOf("?") === -1 ? "?" : "&";
+			var view = makeButton("View route", cfg.page + sep + "walk=" + encodeURIComponent(id), false);
+			view.addEventListener("click", function() { remember(id); });
+			header.insertBefore(view, first);
+		}
+
+		header.insertBefore(makeButton("Download GPX", cfg.folder + encodeURIComponent(file), true), first);
+	}
+
+	function whenPopupReady(id, tries) {
+		var header = document.querySelector(".js-modal .ra-modal-header");
+
+		if (header) {
+			addButtons(id);
+			return;
+		}
+
+		if (tries < 40) {
+			window.setTimeout(function() { whenPopupReady(id, tries + 1); }, 100);
+		}
+	}
+
+	function wrap() {
+		if (!window.ra || !ra.walk || typeof ra.walk.displayWalkID !== "function") {
+			return false;
+		}
+
+		if (ra.walk.displayWalkID.raTweaksWrapped) {
+			return true;
+		}
+
+		var original = ra.walk.displayWalkID;
+		var wrapped = function(event, id) {
+			var result = original.apply(this, arguments);
+			var walkId = String(id);
+			loadRoutes(function() { whenPopupReady(walkId, 0); });
+			return result;
+		};
+
+		wrapped.raTweaksWrapped = true;
+		ra.walk.displayWalkID = wrapped;
+
+		return true;
+	}
+
+	// Back from the route page: open the walk popup again where the reader left it.
+	function reopen() {
+		var saved = null;
+
+		try {
+			saved = JSON.parse(window.sessionStorage.getItem(KEY) || "null");
+		} catch (e) {}
+
+		var nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
+
+		// Leave the note alone on every other page (such as the route page itself).
+		if (!saved || !nav || nav.type !== "back_forward" || saved.url !== window.location.href.split("#")[0]) {
+			return;
+		}
+
+		forget();
+
+		if (Date.now() - saved.at > 1800000) {
+			return;
+		}
+
+		var tries = 0;
+		var timer = window.setInterval(function() {
+			var ready = false;
+
+			try {
+				ready = ra.walk.walks.getEvent(saved.id) !== null;
+			} catch (e) {}
+
+			if (ready) {
+				window.clearInterval(timer);
+				ra.walk.displayWalkID(new Event("dummy"), saved.id);
+			} else if (++tries > 60) {
+				window.clearInterval(timer);
+			}
+		}, 250);
+	}
+
+	// A page restored whole from the browser cache still has its popup open.
+	window.addEventListener("pageshow", function(event) {
+		if (event.persisted) {
+			forget();
+		}
+	});
+
+	var attempts = 0;
+
+	function start() {
+		if (wrap()) {
+			reopen();
+			return;
+		}
+
+		if (++attempts < 120) {
+			window.setTimeout(start, 250);
+		}
+	}
+
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", start);
+	} else {
+		start();
+	}
+})();
+JS;
 	}
 
 	/**

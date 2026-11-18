@@ -21,6 +21,30 @@ The first tweak highlights rendered Ramblers walk titles that contain a configur
 - Optionally appends a coloured walk type label (STROLLER, SHORT WALK, MEDIUM WALK or LONG WALK) to the end of each programme walk title, based on the walk's mileage, so it no longer needs to be typed in manually. Skips walks that already contain a manual walk type in the title, and skips cancelled walks.
 - Evening walks: since start time isn't shown on the programme listing, walk leaders add `- EVENING WALK` anywhere in the title as before. The plugin then moves that text to the end of the title and applies its own configurable colour, consistent with the mileage-based labels. Mileage bands are not applied to evening walks.
 - Diary Dates module: adds a coloured category icon to the left of each entry (Committee Meeting, Social Event, Training, Weekend Away, Coach Trip, Themed Walk), looked up from the linked event's `event_type_id` in the `#__ra_events` table. Runs server-side since the category isn't present in the rendered listing markup, only in the database. Icons are drawn as inline SVG (not emoji) for consistent rendering across browsers, and wrapped titles hang-indent under the text rather than the icon.
+- Walk routes (optional, off by default): walk leaders attach a GPX file to any upcoming walk, and the walk's popup then shows **View route** and **Download GPX** buttons. See [Walk routes](#walk-routes).
+
+## Walk routes
+
+Walks come from Ramblers Walks Manager, so the plugin stores each route itself and links it to the walk by its Walks Manager id. One route per walk; a new upload replaces the old one.
+
+Set up (Plugins > System - RA Tweaks > Walk Routes):
+
+1. Create a Joomla user group for walk leaders (for example "Walk leaders") and a matching access level, and add the leaders to the group.
+2. Create an article containing `{ra_walk_route_upload}` and give it the leaders' access level. Put it in a menu if you want. Leaders choose any upcoming walk, upload a `.gpx` file, and can remove routes.
+3. Create an article containing `{ra_walk_route}` with the Public access level. It shows the map and a download link for `?walk=<id>`. Needs the Ramblers library, which draws the map.
+4. In the plugin settings turn on **Enable walk routes**, pick the group, enter the Walks Manager group code (blank uses the home group from Ramblers Tools), and enter the address of the article from step 3.
+
+Behaviour:
+
+- The route map opens on the OS Explorer/Landranger map (setting **Map shown first**: OS Explorer/Landranger, Ordnance Survey vector, Open Topo Map or Open Street Map). The Ramblers library always starts on OpenStreetMap, so the plugin selects the chosen layer once the map has drawn. The OS layers only exist when the library has an OS key; otherwise the map stays on OpenStreetMap. Explorer/Landranger stops at a fixed zoom, so a very short route (where the map zooms in beyond it) opens on the Ordnance Survey vector map instead.
+- If the reader opens the route page from the walk popup's **View route** button and then goes back (the template's Back button or the browser's), the walk popup opens again on the walks page where they left it.
+- A GPX with no heights (OS Maps' web export has none) is given heights when it is uploaded: the plugin looks them up from Open-Meteo's free elevation service (the server needs outbound web access to `api.open-meteo.com`), lightly smooths them, and stores them in the saved copy, so the route page shows the elevation profile, min/max altitude and climb. If the service is unreachable the file is stored unchanged. The route page also hides "Actual Time: 0hrs 0mins" for files with no timestamps, and shows feet after the metres for min/max altitude and climb. The elevation graph opens in feet with Feet / Metres buttons to switch its height scale (the plotted shape is the same; the scale is relabelled in the page).
+- Anyone can view and download a route. Anyone in the chosen group, and Super Users, can add or remove them.
+- Uploads are checked as real GPX (at least two track or route points, no DOCTYPE or entities), limited in size, and saved under a random file name in `images/walk-routes/`.
+- The list of walks is the group's upcoming walks from the Walks Manager feed (cancelled walks left out), cached for ten minutes. Leaders can attach a route to any of them, because the leader's name is not always given.
+- The popup button script wraps `ra.walk.displayWalkID` and adds the buttons to the popup header when the walk has a route. The list of walks with routes comes from `index.php?option=com_ajax&plugin=ra_tweaks&group=system&format=raw&task=routes`.
+- A route is deleted automatically 30 days (setting) after its walk. The check runs at most once a day.
+- The `#__ra_tweaks_walk_routes` table is created the first time it is needed. Uninstalling the plugin leaves the table and files in place.
 
 ## Install
 
