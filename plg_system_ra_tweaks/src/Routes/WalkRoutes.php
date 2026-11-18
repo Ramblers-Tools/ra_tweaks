@@ -171,7 +171,30 @@ final class WalkRoutes
 			return $html . '<p>Sorry, the route could not be shown.</p>';
 		}
 
-		return $html . ob_get_clean() . $this->defaultMapScript();
+		return $html . $this->wholeZoomScript() . ob_get_clean() . $this->defaultMapScript();
+	}
+
+	/**
+	 * Keeps the Ordnance Survey raster map sharp. Two things blur it:
+	 *  1. The library lets its maps zoom in tenths of a level, and fitting a route to the map
+	 *     lands on a fractional zoom such as 13.4, so the browser stretches the tiles. Zoom in
+	 *     whole levels instead.
+	 *  2. The OS tiles are 256 pixels, which a high-density (retina) screen stretches. Leaflet's
+	 *     detectRetina fetches the next, sharper level and draws it at half size, on those
+	 *     screens only. Only the OS raster layer is changed.
+	 * Both must be in place before the library builds its map, so this goes ahead of the map in
+	 * the page.
+	 */
+	private function wholeZoomScript(): string
+	{
+		return '<script>(function(){var done=false;function hook(){if(done){return true;}'
+			. 'if(!(window.L&&L.Map&&L.Map.addInitHook&&L.TileLayer)){return false;}done=true;'
+			. 'L.Map.addInitHook(function(){this.options.zoomSnap=1;});'
+			. 'var init=L.TileLayer.prototype.initialize;'
+			. 'L.TileLayer.prototype.initialize=function(url,options){'
+			. 'if(typeof url==="string"&&url.indexOf("api.os.uk/maps/raster")!==-1){options=L.extend({},options,{detectRetina:true});}'
+			. 'return init.call(this,url,options);};return true;}'
+			. 'if(!hook()){var n=0,t=window.setInterval(function(){if(hook()||++n>200){window.clearInterval(t);}},10);}})();</script>';
 	}
 
 	/**
