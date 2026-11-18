@@ -121,11 +121,11 @@ final class WalkRoutes
 		}
 
 		if (strpos($text, '{ra_walk_route_upload}') !== false) {
-			$text = str_replace('{ra_walk_route_upload}', $this->renderUpload(), $text);
+			$text = str_replace('{ra_walk_route_upload}', '<div class="ra-walk-route-page">' . $this->renderUpload() . '</div>', $text);
 		}
 
 		if (strpos($text, '{ra_walk_route}') !== false) {
-			$text = str_replace('{ra_walk_route}', $this->renderRoute(), $text);
+			$text = str_replace('{ra_walk_route}', '<div class="ra-walk-route-page">' . $this->renderRoute() . '</div>', $text);
 		}
 
 		return $text;
