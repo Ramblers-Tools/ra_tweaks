@@ -567,6 +567,29 @@ JS;
 			: 'index.php?option=com_plugins&task=plugin.edit&extension_id=' . $extensionId;
 	}
 
+	/**
+	 * The Ramblers library puts one shared Ordnance Survey key into every map page. When the club
+	 * has its own key (setting "os_key"), swap it in before the page is sent, so every OS layer
+	 * uses the club's project and allowance and the shared key is never sent to the browser.
+	 * Does nothing if no key is set, the library is not loaded, or the page has no OS map.
+	 */
+	private function useClubOsKey(string $body): string
+	{
+		$key = trim((string) $this->params->get('os_key', ''));
+
+		if ($key === '' || !preg_match('/^[A-Za-z0-9]{20,64}$/', $key) || !class_exists('RLicense')) {
+			return $body;
+		}
+
+		$shared = \RLicense::getOrdnanceSurveyLicenseKey();
+
+		if (!is_string($shared) || $shared === '' || $shared === $key || strpos($body, $shared) === false) {
+			return $body;
+		}
+
+		return str_replace($shared, $key, $body);
+	}
+
 	public function onAfterRender(): void
 	{
 		if (!$this->app->isClient('site')) {
@@ -577,6 +600,13 @@ JS;
 
 		if ($body === '' || stripos($body, '<html') === false) {
 			return;
+		}
+
+		$withClubKey = $this->useClubOsKey($body);
+
+		if ($withClubKey !== $body) {
+			$body = $withClubKey;
+			$this->app->setBody($body);
 		}
 
 		$marker = (string) $this->params->get('marker', '***');
