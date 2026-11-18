@@ -237,6 +237,20 @@ JS;
 		request.send();
 	}
 
+	var KEY = "raTweaksReopenWalk";
+
+	function remember(id) {
+		try {
+			window.sessionStorage.setItem(KEY, JSON.stringify({id: id, url: window.location.href.split("#")[0], at: Date.now()}));
+		} catch (e) {}
+	}
+
+	function forget() {
+		try {
+			window.sessionStorage.removeItem(KEY);
+		} catch (e) {}
+	}
+
 	function makeButton(text, href, download) {
 		var link = document.createElement("a");
 		link.className = "link-button tiny cloudy ra-tweaks-route-button";
@@ -269,7 +283,9 @@ JS;
 
 		if (cfg.page) {
 			var sep = cfg.page.indexOf("?") === -1 ? "?" : "&";
-			header.insertBefore(makeButton("View route", cfg.page + sep + "walk=" + encodeURIComponent(id), false), first);
+			var view = makeButton("View route", cfg.page + sep + "walk=" + encodeURIComponent(id), false);
+			view.addEventListener("click", function() { remember(id); });
+			header.insertBefore(view, first);
 		}
 
 		header.insertBefore(makeButton("Download GPX", cfg.folder + encodeURIComponent(file), true), first);
@@ -311,10 +327,56 @@ JS;
 		return true;
 	}
 
+	// Back from the route page: open the walk popup again where the reader left it.
+	function reopen() {
+		var saved = null;
+
+		try {
+			saved = JSON.parse(window.sessionStorage.getItem(KEY) || "null");
+		} catch (e) {}
+
+		var nav = window.performance && performance.getEntriesByType ? performance.getEntriesByType("navigation")[0] : null;
+
+		// Leave the note alone on every other page (such as the route page itself).
+		if (!saved || !nav || nav.type !== "back_forward" || saved.url !== window.location.href.split("#")[0]) {
+			return;
+		}
+
+		forget();
+
+		if (Date.now() - saved.at > 1800000) {
+			return;
+		}
+
+		var tries = 0;
+		var timer = window.setInterval(function() {
+			var ready = false;
+
+			try {
+				ready = ra.walk.walks.getEvent(saved.id) !== null;
+			} catch (e) {}
+
+			if (ready) {
+				window.clearInterval(timer);
+				ra.walk.displayWalkID(new Event("dummy"), saved.id);
+			} else if (++tries > 60) {
+				window.clearInterval(timer);
+			}
+		}, 250);
+	}
+
+	// A page restored whole from the browser cache still has its popup open.
+	window.addEventListener("pageshow", function(event) {
+		if (event.persisted) {
+			forget();
+		}
+	});
+
 	var attempts = 0;
 
 	function start() {
 		if (wrap()) {
+			reopen();
 			return;
 		}
 

@@ -37,6 +37,7 @@ Set up (Plugins > System - RA Tweaks > Walk Routes):
 Behaviour:
 
 - The route map opens on the OS Explorer/Landranger map (setting **Map shown first**: OS Explorer/Landranger, Ordnance Survey vector, Open Topo Map or Open Street Map). The Ramblers library always starts on OpenStreetMap, so the plugin selects the chosen layer once the map has drawn. The OS layers only exist when the library has an OS key; otherwise the map stays on OpenStreetMap. Explorer/Landranger stops at a fixed zoom, so a very short route (where the map zooms in beyond it) opens on the Ordnance Survey vector map instead.
+- If the reader opens the route page from the walk popup's **View route** button and then goes back (the template's Back button or the browser's), the walk popup opens again on the walks page where they left it.
 - Anyone can view and download a route. Anyone in the chosen group, and Super Users, can add or remove them.
 - Uploads are checked as real GPX (at least two track or route points, no DOCTYPE or entities), limited in size, and saved under a random file name in `images/walk-routes/`.
 - The list of walks is the group's upcoming walks from the Walks Manager feed (cancelled walks left out), cached for ten minutes. Leaders can attach a route to any of them, because the leader's name is not always given.
