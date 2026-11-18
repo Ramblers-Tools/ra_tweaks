@@ -171,7 +171,18 @@ final class WalkRoutes
 			return $html . '<p>Sorry, the route could not be shown.</p>';
 		}
 
-		return $html . $this->wholeZoomScript() . ob_get_clean() . $this->defaultMapScript();
+		return $html . $this->wholeZoomScript() . ob_get_clean() . $this->defaultMapScript() . $this->hideEmptyTimeScript();
+	}
+
+	/**
+	 * A file with no timestamps makes the library print "Actual Time: 0hrs 0mins". Remove that line.
+	 */
+	private function hideEmptyTimeScript(): string
+	{
+		return '<script>(function(){var n=0,t=window.setInterval(function(){'
+			. 'var d=document.querySelector("[leaflet-browser-print-pages]");'
+			. 'if(d&&d.innerHTML.indexOf("Actual Time")!==-1){d.innerHTML=d.innerHTML.replace(/<b>Actual Time:<\\/b>\\s*0hrs 0mins\\s*<br\\s*\\/?>/i,"");window.clearInterval(t);}'
+			. 'else if(++n>100){window.clearInterval(t);}},200);})();</script>';
 	}
 
 	/**
@@ -405,6 +416,92 @@ final class WalkRoutes
 		return \is_array($points) && \count($points) >= 2;
 	}
 
+	/**
+	 * Many GPX files, including the ones OS Maps exports, carry positions but no heights, so the
+	 * route page shows "No elevation data" and an empty profile. When a file has no heights at
+	 * all, look them up (Open-Meteo's free elevation service, 90 m terrain model, in batches of
+	 * 100 points), smooth them lightly and write them into the stored copy. If the service cannot be reached the
+	 * file is stored as it came.
+	 */
+	public function withElevation(string $xml): string
+	{
+		$doc = new \DOMDocument();
+		$previous = libxml_use_internal_errors(true);
+		$loaded = $doc->loadXML($xml, LIBXML_NONET | LIBXML_NOCDATA);
+		libxml_clear_errors();
+		libxml_use_internal_errors($previous);
+
+		if (!$loaded) {
+			return $xml;
+		}
+
+		$xpath = new \DOMXPath($doc);
+		$points = [];
+
+		foreach ($xpath->query('//*[local-name()="trkpt" or local-name()="rtept"]') as $point) {
+			if ($xpath->query('*[local-name()="ele"]', $point)->length > 0) {
+				return $xml;
+			}
+
+			$points[] = $point;
+		}
+
+		if ($points === [] || \count($points) > 3000) {
+			return $xml;
+		}
+
+		$http = HttpFactory::getHttp();
+		$heights = [];
+
+		foreach (array_chunk($points, 100) as $chunk) {
+			$lat = [];
+			$lon = [];
+
+			foreach ($chunk as $point) {
+				$lat[] = round((float) $point->getAttribute('lat'), 5);
+				$lon[] = round((float) $point->getAttribute('lon'), 5);
+			}
+
+			try {
+				$response = $http->get(
+					'https://api.open-meteo.com/v1/elevation?latitude=' . implode(',', $lat) . '&longitude=' . implode(',', $lon),
+					[],
+					8
+				);
+				$data = json_decode((string) $response->getBody(), true);
+			} catch (\Throwable $e) {
+				return $xml;
+			}
+
+			if (!\is_array($data) || !isset($data['elevation']) || \count($data['elevation']) !== \count($chunk)) {
+				return $xml;
+			}
+
+			foreach ($data['elevation'] as $height) {
+				$heights[] = (float) $height;
+			}
+		}
+
+		// The terrain model is coarse, so raw heights jitter and the climb adds up too high.
+		// A five-point average brings the total close to what OS Maps itself reports.
+		$count = \count($heights);
+		$smooth = [];
+
+		for ($i = 0; $i < $count; $i++) {
+			$window = \array_slice($heights, max(0, $i - 2), min($count, $i + 3) - max(0, $i - 2));
+			$smooth[$i] = array_sum($window) / \count($window);
+		}
+
+		foreach ($points as $i => $point) {
+			$ele = $doc->createElementNS($point->namespaceURI, 'ele', (string) round($smooth[$i], 1));
+			$point->insertBefore($ele, $point->firstChild);
+		}
+
+		$out = $doc->saveXML();
+
+		return \is_string($out) && $out !== '' ? $out : $xml;
+	}
+
 	/** @param array{id:string,title:string,date:string,group:string} $walk */
 	private function store(array $walk, string $xml): bool
 	{
@@ -420,7 +517,7 @@ final class WalkRoutes
 
 		$file = 'walk-' . $walk['id'] . '-' . bin2hex(random_bytes(4)) . '.gpx';
 
-		if (@file_put_contents($dir . '/' . $file, $xml) === false) {
+		if (@file_put_contents($dir . '/' . $file, $this->withElevation($xml)) === false) {
 			return false;
 		}
 
