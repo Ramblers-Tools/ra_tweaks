@@ -137,7 +137,22 @@ final class PastWalks
 			. 'function keepAll(list){list.registerEvent=function(event){list.events.push(event);};}'
 			. 'var Events=ra.events;ra.events=function(){Events.apply(this,arguments);keepAll(this);};'
 			. 'ra.events.prototype=Events.prototype;ra.events.raKeepPast=true;'
-			. 'if(ra.walk&&ra.walk.walks){keepAll(ra.walk.walks);}});</script>';
+			. 'if(ra.walk&&ra.walk.walks){keepAll(ra.walk.walks);}});</script>'
+			. $this->hideButtonsScript();
+	}
+
+	/**
+	 * Print and Add to Calendar make no sense for walks that have happened. The library draws
+	 * them (in the list, and in the walk popup's header) without a class of their own, and
+	 * draws them again whenever a tab or filter changes, so they are hidden by their label.
+	 */
+	private function hideButtonsScript(): string
+	{
+		return '<script>(function(){var labels=["Print","Add to Calendar"];'
+			. 'function hide(){document.querySelectorAll(".ra-past-walks button,.ra-modal-header button").forEach(function(b){'
+			. 'if(b.style.display!=="none"&&labels.indexOf((b.textContent||"").trim())!==-1){b.style.display="none";}});}'
+			. 'document.addEventListener("DOMContentLoaded",function(){hide();'
+			. 'new MutationObserver(hide).observe(document.body,{childList:true,subtree:true});});})();</script>';
 	}
 
 	/**
