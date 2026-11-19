@@ -762,8 +762,14 @@ JS . '</script>';
 		@touch($marker);
 
 		try {
+			$days = (int) $this->params->get('routes_keep_days', 0);
+
+			// 0 keeps routes for ever (past walks keep their routes).
+			if ($days <= 0) {
+				return;
+			}
+
 			$this->ensureTable();
-			$days = max(1, (int) $this->params->get('routes_keep_days', 30));
 			$cutoff = Factory::getDate('-' . $days . ' days')->format('Y-m-d');
 			$query = $this->db->getQuery(true)
 				->select('*')
@@ -855,7 +861,7 @@ JS . '</script>';
 		return [$walks, ''];
 	}
 
-	private function groupCodes(): string
+	public function groupCodes(): string
 	{
 		$codes = strtoupper(preg_replace('/[^A-Za-z0-9,]/', '', (string) $this->params->get('routes_group_codes', '')));
 
@@ -878,13 +884,13 @@ JS . '</script>';
 		}
 	}
 
-	private function feedBase(): string
+	public function feedBase(): string
 	{
 		return \defined('WALKMANAGER') ? (string) WALKMANAGER : 'https://walks-manager.ramblers.org.uk/api/volunteers/walksevents?';
 	}
 
 	/** The Ramblers library carries the Walks Manager key, so use the same one the walk pages use. */
-	private function apiKey(): string
+	public function apiKey(): string
 	{
 		if (\defined('APIKEY')) {
 			return (string) APIKEY;
