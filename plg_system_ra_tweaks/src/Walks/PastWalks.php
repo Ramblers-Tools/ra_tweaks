@@ -122,7 +122,7 @@ final class PastWalks
 			return $this->message('Past walks could not be shown just now.');
 		}
 
-		return (string) ob_get_clean() . $this->keepPastScript();
+		return $this->searchBox() . (string) ob_get_clean() . $this->keepPastScript();
 	}
 
 	/**
@@ -137,7 +137,18 @@ final class PastWalks
 		return '<script>document.addEventListener("DOMContentLoaded",function(){'
 			. 'if(typeof ra==="undefined"||typeof ra.events!=="function"||ra.events.raKeepPast){return;}'
 			. 'function keepAll(list){list.registerEvent=function(event){list.events.push(event);};}'
-			. 'var Events=ra.events;ra.events=function(){Events.apply(this,arguments);keepAll(this);};'
+			// The search box: after the library's own filters, a walk must also contain every
+			// word typed (see searchBox()).
+			. 'function searchable(list){var own=list.setDisplayFilter;list.setDisplayFilter=function(){own.apply(list,arguments);'
+			. 'var words=window.raPastWalksSearch||[];if(!words.length){return;}'
+			. 'list.events.forEach(function(e){if(!e._displayFiltered){return;}if(e._raText===undefined){e._raText=raWalkText(e);}'
+			. 'for(var i=0;i<words.length;i++){if(e._raText.indexOf(words[i])===-1){e._displayFiltered=false;return;}}});};}'
+			. 'function raWalkText(e){var parts=[e.basics.title,e.basics.description,e.basics.descriptionHtml,e.basics.additionalNotes];'
+			. '["meeting","start","finish","contacts"].forEach(function(k){((e[k]&&e[k].items)||[]).forEach(function(it){'
+			. 'parts.push(it.description,it.postcode,it.gridref,it.contactName);});});'
+			. 'var d=document.createElement("div");d.innerHTML=parts.filter(Boolean).join(" ");'
+			. 'return (d.textContent||"").toLowerCase().replace(/\\s+/g," ");}'
+			. 'var Events=ra.events;ra.events=function(){Events.apply(this,arguments);keepAll(this);searchable(this);};'
 			. 'ra.events.prototype=Events.prototype;ra.events.raKeepPast=true;'
 			. 'if(ra.walk&&ra.walk.walks){keepAll(ra.walk.walks);}'
 			// The library adds the year to a date only for walks about a year ahead; past
@@ -178,6 +189,25 @@ final class PastWalks
 			. 'if(box.getAttribute("data-ra-os")){return;}box.setAttribute("data-ra-os","1");pick(box,0);});}'
 			. 'document.addEventListener("DOMContentLoaded",function(){scan();'
 			. 'new MutationObserver(scan).observe(document.body,{childList:true,subtree:true});});})();</script>';
+	}
+
+	/**
+	 * A search box above the walks: leader, place, postcode, grid reference or any word in
+	 * the walk's title or description. Every word typed must appear. It feeds the library's
+	 * own filtering, so the list, calendar and map all narrow down together.
+	 */
+	private function searchBox(): string
+	{
+		return '<div class="ra-past-walks__search">'
+			. '<label for="ra-past-walks-q" class="form-label">Search past walks</label>'
+			. '<input type="search" id="ra-past-walks-q" class="form-control" autocomplete="off"'
+			. ' placeholder="Leader, place, postcode or walk name">'
+			. '</div>'
+			. '<script>(function(){var box=document.getElementById("ra-past-walks-q"),timer=null;'
+			. 'function run(){var q=box.value.toLowerCase().replace(/\\s+/g," ").trim();'
+			. 'window.raPastWalksSearch=q?q.split(" "):[];document.dispatchEvent(new Event("reDisplayWalks"));'
+			. '}'
+			. 'box.addEventListener("input",function(){window.clearTimeout(timer);timer=window.setTimeout(run,250);});})();</script>';
 	}
 
 	/**
