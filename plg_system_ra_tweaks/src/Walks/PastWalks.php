@@ -139,7 +139,14 @@ final class PastWalks
 			. 'function keepAll(list){list.registerEvent=function(event){list.events.push(event);};}'
 			. 'var Events=ra.events;ra.events=function(){Events.apply(this,arguments);keepAll(this);};'
 			. 'ra.events.prototype=Events.prototype;ra.events.raKeepPast=true;'
-			. 'if(ra.walk&&ra.walk.walks){keepAll(ra.walk.walks);}});</script>'
+			. 'if(ra.walk&&ra.walk.walks){keepAll(ra.walk.walks);}'
+			// The library adds the year to a date only for walks about a year ahead; past
+			// walks always need it (the popup's date, the List tab's month headings).
+			. 'if(ra.event&&typeof ra.event.basics==="function"){var Basics=ra.event.basics;'
+			. 'ra.event.basics=function(){Basics.apply(this,arguments);var self=this;'
+			. 'this.addYear=function(){return " "+ra.date.YYYY(ra.date.getDateTime(self.walkDate));};};'
+			. 'ra.event.basics.prototype=Basics.prototype;}'
+			. '});</script>'
 			. $this->hideButtonsScript();
 	}
 
