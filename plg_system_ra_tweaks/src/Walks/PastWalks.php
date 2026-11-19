@@ -158,13 +158,12 @@ final class PastWalks
 		$maxMb = max(1, min(20, (int) $this->params->get('routes_max_mb', 5)));
 
 		return '<style>'
-			// The button sits over the right of the walk's card (it cannot go inside the card,
-			// which is a link that opens the popup); the card keeps room for it.
+			// A small button in the top right corner of the walk's card (laid over it: it cannot
+			// go inside the card, which is a link that opens the popup). The title keeps room for it.
 			. '.ra-past-walks .ecr-walkrow.ra-gpx-row{position:relative}'
-			. '.ra-past-walks .ra-gpx-row>.ecr-walk{padding-right:calc(8.5rem + 32px)}'
-			. '.ra-past-walks .ra-gpx-btn{position:absolute;right:16px;top:50%;transform:translateY(-50%);min-width:8.5rem;white-space:nowrap;z-index:1}'
-			. '@media (max-width:599px){.ra-past-walks .ra-gpx-row>.ecr-walk{padding-right:16px;padding-bottom:56px}'
-			. '.ra-past-walks .ra-gpx-btn{top:auto;bottom:12px;transform:none}}'
+			. '.ra-past-walks .ra-gpx-row .ecr-walk__title{padding-right:6.5rem}'
+			. '.ra-past-walks .ra-gpx-btn{position:absolute;top:8px;right:8px;z-index:1;white-space:nowrap;'
+			. 'font-size:.75rem;line-height:1.2;padding:3px 10px;min-height:0;border-width:1px}'
 			. '.ra-gpx-dialog{max-width:30rem;width:calc(100% - 32px);border:0;border-radius:8px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3)}'
 			. '.ra-gpx-dialog::backdrop{background:rgba(0,0,0,.45)}'
 			. '.ra-gpx-dialog h2{font-size:1.25rem;margin:0 0 .25rem}'
