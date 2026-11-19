@@ -307,11 +307,14 @@ final class PastWalks
 			// word typed (see searchBox()).
 			. 'function searchable(list){var own=list.setDisplayFilter;list.setDisplayFilter=function(){own.apply(list,arguments);'
 			. 'var words=window.raPastWalksSearch||[],only=window.raPastWalksGpxOnly?(window.raPastWalksGpx||{}):null;'
-			. 'if(!words.length&&!only){return;}'
+			. 'if(words.length||only){'
 			. 'list.events.forEach(function(e){if(!e._displayFiltered){return;}'
 			. 'if(only&&!(e.admin&&only[e.admin.id])){e._displayFiltered=false;return;}'
 			. 'if(e._raText===undefined){e._raText=raWalkText(e);}'
-			. 'for(var i=0;i<words.length;i++){if(e._raText.indexOf(words[i])===-1){e._displayFiltered=false;return;}}});};}'
+			. 'for(var i=0;i<words.length;i++){if(e._raText.indexOf(words[i])===-1){e._displayFiltered=false;return;}}});}'
+			// Always say how many walks are shown (the library only does so when there is more than one page).
+			. 'var out=document.getElementById("ra-past-walks-count");if(out){var n=0;list.events.forEach(function(e){if(e._displayFiltered){n++;}});'
+			. 'out.textContent=n===list.events.length?n+" past walks":(n===0?"No walks match":n+(n===1?" walk matches":" walks match"));}};}'
 			. 'function raWalkText(e){var parts=[e.basics.title,e.basics.description,e.basics.descriptionHtml,e.basics.additionalNotes];'
 			. '["meeting","start","finish","contacts"].forEach(function(k){((e[k]&&e[k].items)||[]).forEach(function(it){'
 			. 'parts.push(it.description,it.postcode,it.gridref,it.contactName);});});'
@@ -395,6 +398,7 @@ final class PastWalks
 			. '<input type="search" id="ra-past-walks-q" class="form-control" autocomplete="off"'
 			. ' placeholder="Leader, place, postcode or walk name">'
 			. $gpx
+			. '<p class="ra-past-walks__count" id="ra-past-walks-count" role="status" aria-live="polite">' . \count($items) . ' past walks</p>'
 			. '</div>'
 			. '<script>(function(){window.raPastWalksGpx=' . json_encode((object) $withRoute) . ';'
 			. 'var box=document.getElementById("ra-past-walks-q"),tick=document.getElementById("ra-past-walks-gpx"),timer=null;'
