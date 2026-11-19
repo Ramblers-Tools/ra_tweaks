@@ -46,6 +46,14 @@ final class PastWalks
 	 */
 	public static ?array $shown = null;
 
+	/**
+	 * Walk id => links to its Photo Gallery albums (see PhotoAlbums), for the template's Photos
+	 * pill and the popup's Photos button.
+	 *
+	 * @var array<string,array<int,string>>|null
+	 */
+	public static ?array $photos = null;
+
 	private Registry $params;
 	private DatabaseInterface $db;
 	private WalkRoutes $routes;
@@ -114,6 +122,12 @@ final class PastWalks
 		$walks->sort(\RJsonwalksWalk::SORT_DATE, \RJsonwalksWalk::SORT_TIME, \RJsonwalksWalk::SORT_DISTANCE);
 		self::$shown = $walks->allWalks();
 
+		try {
+			self::$photos = (new PhotoAlbums($this->db))->forWalks($items);
+		} catch (\Throwable $e) {
+			self::$photos = [];
+		}
+
 		ob_start();
 
 		try {
@@ -126,7 +140,36 @@ final class PastWalks
 			return $this->message('Past walks could not be shown just now.');
 		}
 
-		return $this->searchBox($items) . (string) ob_get_clean() . $this->keepPastScript() . $this->gpxButtons($items);
+		return $this->searchBox($items) . (string) ob_get_clean() . $this->keepPastScript() . $this->gpxButtons($items)
+			. $this->photosPopupScript();
+	}
+
+	/**
+	 * A "Photos" button in the walk popup (beside View route / Close) when the walk has a
+	 * Photo Gallery album; "Photos 2" and so on when there are more. It learns which walk is
+	 * opening by wrapping ra.walk.displayWalkID, as the route buttons do.
+	 */
+	private function photosPopupScript(): string
+	{
+		if (!self::$photos) {
+			return '';
+		}
+
+		$json = (string) json_encode((object) self::$photos, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES);
+
+		return '<script>(function(){var albums=' . $json . ';'
+			. 'function add(id,tries){var header=document.querySelector(".js-modal .ra-modal-header");'
+			. 'if(!header){if(tries<40){window.setTimeout(function(){add(id,tries+1);},100);}return;}'
+			. 'if(header.querySelector(".ra-tweaks-photos-button")){return;}'
+			. 'var first=header.firstChild;(albums[id]||[]).forEach(function(url,i){var a=document.createElement("a");'
+			. 'a.className="link-button tiny cloudy ra-tweaks-photos-button";a.textContent=i?"Photos "+(i+1):"Photos";a.href=url;'
+			. 'a.style.marginRight="0.5em";header.insertBefore(a,first);});}'
+			. 'function wrap(){if(!window.ra||!ra.walk||typeof ra.walk.displayWalkID!=="function"){return false;}'
+			. 'if(ra.walk.displayWalkID.raPhotosWrapped){return true;}var original=ra.walk.displayWalkID;'
+			. 'var wrapped=function(event,id){var result=original.apply(this,arguments);if(albums[String(id)]){add(String(id),0);}return result;};'
+			. 'for(var k in original){if(Object.prototype.hasOwnProperty.call(original,k)){wrapped[k]=original[k];}}'
+			. 'wrapped.raPhotosWrapped=true;ra.walk.displayWalkID=wrapped;return true;}'
+			. 'window.addEventListener("load",function(){var n=0;(function again(){if(!wrap()&&n++<20){window.setTimeout(again,250);}})();});})();</script>';
 	}
 
 	/**
@@ -306,10 +349,10 @@ final class PastWalks
 			// The search box: after the library's own filters, a walk must also contain every
 			// word typed (see searchBox()).
 			. 'function searchable(list){var own=list.setDisplayFilter;list.setDisplayFilter=function(){own.apply(list,arguments);'
-			. 'var words=window.raPastWalksSearch||[],only=window.raPastWalksGpxOnly?(window.raPastWalksGpx||{}):null;'
-			. 'if(words.length||only){'
+			. 'var words=window.raPastWalksSearch||[],sets=[];if(window.raPastWalksGpxOnly){sets.push(window.raPastWalksGpx||{});}if(window.raPastWalksPhotosOnly){sets.push(window.raPastWalksPhotos||{});}'
+			. 'if(words.length||sets.length){'
 			. 'list.events.forEach(function(e){if(!e._displayFiltered){return;}'
-			. 'if(only&&!(e.admin&&only[e.admin.id])){e._displayFiltered=false;return;}'
+			. 'for(var s=0;s<sets.length;s++){if(!(e.admin&&sets[s][e.admin.id])){e._displayFiltered=false;return;}}'
 			. 'if(e._raText===undefined){e._raText=raWalkText(e);}'
 			. 'for(var i=0;i<words.length;i++){if(e._raText.indexOf(words[i])===-1){e._displayFiltered=false;return;}}});}'
 			// Always say how many walks are shown (the library only does so when there is more than one page).
@@ -384,30 +427,34 @@ final class PastWalks
 			}
 		}
 
-		$gpx = '';
+		$withPhotos = array_fill_keys(array_keys(self::$photos ?? []), 1);
 
-		if ($withRoute) {
-			$gpx = '<div class="form-check ra-past-walks__gpx">'
-				. '<input class="form-check-input" type="checkbox" id="ra-past-walks-gpx" autocomplete="off">'
-				. '<label class="form-check-label" for="ra-past-walks-gpx">Only walks with a GPX route (' . \count($withRoute) . ')</label>'
+		$tick = static function (string $id, string $text, int $count): string {
+			return $count < 1 ? '' : '<div class="form-check ra-past-walks__gpx">'
+				. '<input class="form-check-input" type="checkbox" id="' . $id . '" autocomplete="off">'
+				. '<label class="form-check-label" for="' . $id . '">' . $text . ' (' . $count . ')</label>'
 				. '</div>';
-		}
+		};
 
 		return '<div class="ra-past-walks__search">'
 			. '<label for="ra-past-walks-q" class="form-label">Search past walks</label>'
 			. '<input type="search" id="ra-past-walks-q" class="form-control" autocomplete="off"'
 			. ' placeholder="Leader, place, postcode or walk name">'
-			. $gpx
+			. $tick('ra-past-walks-gpx', 'Only walks with a GPX route', \count($withRoute))
+			. $tick('ra-past-walks-photos', 'Only walks with photos', \count($withPhotos))
 			. '<p class="ra-past-walks__count" id="ra-past-walks-count" role="status" aria-live="polite">' . \count($items) . ' past walks</p>'
 			. '</div>'
 			. '<script>(function(){window.raPastWalksGpx=' . json_encode((object) $withRoute) . ';'
-			. 'var box=document.getElementById("ra-past-walks-q"),tick=document.getElementById("ra-past-walks-gpx"),timer=null;'
+			. 'window.raPastWalksPhotos=' . json_encode((object) $withPhotos) . ';'
+			. 'var box=document.getElementById("ra-past-walks-q"),tick=document.getElementById("ra-past-walks-gpx"),'
+			. 'pics=document.getElementById("ra-past-walks-photos"),timer=null;'
 			. 'function run(){var q=box.value.toLowerCase().replace(/\\s+/g," ").trim();'
 			. 'window.raPastWalksSearch=q?q.split(" "):[];window.raPastWalksGpxOnly=!!(tick&&tick.checked);'
+			. 'window.raPastWalksPhotosOnly=!!(pics&&pics.checked);'
 			. 'document.dispatchEvent(new Event("reDisplayWalks"));'
 			. '}'
 			. 'box.addEventListener("input",function(){window.clearTimeout(timer);timer=window.setTimeout(run,250);});'
-			. 'if(tick){tick.addEventListener("change",run);}})();</script>';
+			. 'if(tick){tick.addEventListener("change",run);}if(pics){pics.addEventListener("change",run);}})();</script>';
 	}
 
 	/**
