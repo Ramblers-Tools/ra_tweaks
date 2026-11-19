@@ -278,6 +278,22 @@
 					showon="walk_routes:1"
 				/>
 			</fieldset>
+			<fieldset
+				name="maps"
+				label="PLG_SYSTEM_RA_TWEAKS_FIELDSET_MAPS_LABEL"
+				description="PLG_SYSTEM_RA_TWEAKS_FIELDSET_MAPS_DESC"
+			>
+				<field
+					name="os_key"
+					type="text"
+					label="PLG_SYSTEM_RA_TWEAKS_FIELD_OS_KEY_LABEL"
+					description="PLG_SYSTEM_RA_TWEAKS_FIELD_OS_KEY_DESC"
+					default=""
+					maxlength="64"
+					filter="alnum"
+					autocomplete="off"
+				/>
+			</fieldset>
 		</fields>
 	</config>
 </extension>

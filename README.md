@@ -83,3 +83,6 @@ For each release, update `updates/ra_tweaks.xml` to the new version and make sur
   - Evening Walk is not detected automatically (walk start times aren't shown on the programme page) — keep adding it manually to the title.
 
 The marker remains visible because the website key uses it to denote changed walk details.
+
+## Maps: club Ordnance Survey key
+The Ramblers library puts one shared Ordnance Survey key into every map page. Enter the club's own OS Data Hub key under **Maps > Club Ordnance Survey key** (the project needs OS Maps API and OS Vector Tile API) and the plugin swaps it in on the server before the page is sent, so every OS layer (Explorer/Landranger, OS vector) uses the club's project and allowance and the shared key is not sent to the browser. Leave it blank to keep the library's key. The key is visible in the page source; the OS Data Hub does not offer per-key restrictions, so use a key made for this website and watch the project's usage.
