@@ -202,7 +202,8 @@ final class PastWalks
 				foreach ((array) json_decode((string) $row->data) as $item) {
 					if (\is_object($item) && !$this->isCancelled($item)
 						&& substr((string) ($item->start_date_time ?? ''), 0, 10) <= $yesterday->format('Y-m-d')) {
-						$items[] = $item;
+						// Again on reading: years stored before this was added still have them.
+						$items[] = $this->withoutContacts($item);
 					}
 				}
 			}
@@ -263,12 +264,57 @@ final class PastWalks
 				];
 			}
 
-			$kept[(string) ($item->id ?? '')] = $item;
+			$kept[(string) ($item->id ?? '')] = $this->withoutContacts($item);
 		}
 
 		unset($kept['']);
 
 		return array_values($kept);
+	}
+
+	/**
+	 * Phone numbers and email addresses that leaders typed into the walk's text (for example
+	 * "Lift available from ... 07xxx xxxxxx") are blanked out: past walks show no contact
+	 * details. Grid references and postcodes are left alone.
+	 */
+	private function withoutContacts(object $item): object
+	{
+		foreach (['title', 'description', 'additional_details'] as $field) {
+			if (isset($item->{$field}) && \is_string($item->{$field})) {
+				$item->{$field} = self::blankContacts($item->{$field});
+			}
+		}
+
+		foreach (['meeting_location', 'start_location', 'end_location'] as $place) {
+			if (isset($item->{$place}) && \is_object($item->{$place}) && isset($item->{$place}->description) && \is_string($item->{$place}->description)) {
+				$item->{$place}->description = self::blankContacts($item->{$place}->description);
+			}
+		}
+
+		return $item;
+	}
+
+	public static function blankContacts(string $text): string
+	{
+		$gone = '(contact details removed)';
+
+		// Links first, so the link text goes with them.
+		$text = (string) preg_replace('~<a\b[^>]*href\s*=\s*["\']?\s*(?:mailto|tel):[^>]*>.*?</a>~is', $gone, $text);
+		$text = (string) preg_replace('~[A-Za-z0-9._%+\-]+(?:@|\s*\[at\]\s*|&#64;)[A-Za-z0-9.\-]+\.[A-Za-z]{2,}~', $gone, $text);
+
+		// UK phone numbers: start 0 or +44, then digits in two or three groups (07xxx xxxxxx,
+		// 0161 xxx xxxx, 01625 xxxxxx), 10 or 11 digits in all (12 allowed for a mistyped one). A grid square (two capitals, as in SJ 07512 17890) just before means it is a grid reference.
+		return (string) preg_replace_callback(
+			'~(?<!\b[A-Z]{2}\s)(?<!\b[A-Z]{2})(?<![\d.])(?:\+\s?44\s?(?:\(0\)\s?)?|\(?0)\d{2,5}\)?[\s.\-]?\d{3,4}[\s.\-]?\d{2,4}(?![\d])~',
+			static function (array $m) use ($gone): string {
+				$digits = preg_replace('/\D/', '', $m[0]);
+				$digits = strpos($m[0], '+') !== false ? '0' . substr((string) $digits, 2) : (string) $digits;
+				$digits = preg_replace('/^00/', '0', $digits);
+
+				return \strlen((string) $digits) >= 10 && \strlen((string) $digits) <= 12 ? $gone : $m[0];
+			},
+			$text
+		);
 	}
 
 	/**
