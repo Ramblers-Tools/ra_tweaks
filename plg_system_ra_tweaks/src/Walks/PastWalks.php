@@ -21,6 +21,8 @@ namespace Ramblerseastcheshire\Plugin\System\RaTweaks\Walks;
 
 use Joomla\CMS\Factory;
 use Joomla\CMS\Http\HttpFactory;
+use Joomla\CMS\Session\Session;
+use Joomla\CMS\Uri\Uri;
 use Joomla\Database\DatabaseInterface;
 use Joomla\Registry\Registry;
 use Ramblerseastcheshire\Plugin\System\RaTweaks\Routes\WalkRoutes;
@@ -86,6 +88,8 @@ final class PastWalks
 			return $this->message('No past walks are available just now. Please try again later.');
 		}
 
+		$this->handleUpload($items);
+
 		$source = new \RJsonwalksSourcewalksmanager();
 		$walks = new class extends \RJsonwalksWalks {
 			// The library sorts walks soonest first and then reads them with allWalks().
@@ -122,7 +126,168 @@ final class PastWalks
 			return $this->message('Past walks could not be shown just now.');
 		}
 
-		return $this->searchBox() . (string) ob_get_clean() . $this->keepPastScript();
+		return $this->searchBox() . (string) ob_get_clean() . $this->keepPastScript() . $this->gpxButtons($items);
+	}
+
+	/**
+	 * Walk leaders (the Walk Routes leaders group) and Super Users get an "Add GPX" button
+	 * beside each walk ("Replace GPX" when it has a route), which opens a small form for that
+	 * walk. Nothing of this is sent to anyone else.
+	 *
+	 * @param array<int,object> $items
+	 */
+	private function gpxButtons(array $items): string
+	{
+		if (!$this->routes->enabled() || !$this->routes->canManage()) {
+			return '';
+		}
+
+		$has = (array) json_decode($this->routes->lookupJson(), true);
+		$walks = [];
+
+		foreach ($items as $item) {
+			$id = (string) ($item->id ?? '');
+
+			if ($id !== '') {
+				$walks[$id] = [$this->walkLabel($item), isset($has[$id]) ? 1 : 0];
+			}
+		}
+
+		$json = static fn ($v): string => (string) json_encode($v, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+		$e = static fn (string $t): string => htmlspecialchars($t, ENT_QUOTES, 'UTF-8');
+		$maxMb = max(1, min(20, (int) $this->params->get('routes_max_mb', 5)));
+
+		return '<style>'
+			. '.ra-past-walks .ecr-walkrow.ra-gpx-row{display:flex;align-items:center;gap:12px}'
+			. '.ra-past-walks .ra-gpx-row>.ecr-walk{flex:1 1 auto;min-width:0}'
+			. '.ra-past-walks .ra-gpx-btn{flex:0 0 auto;min-width:8.5rem;white-space:nowrap}'
+			. '@media (max-width:599px){.ra-past-walks .ecr-walkrow.ra-gpx-row{flex-wrap:wrap;justify-content:flex-end;gap:6px}'
+			. '.ra-past-walks .ra-gpx-row>.ecr-walk{flex-basis:100%}}'
+			. '.ra-gpx-dialog{max-width:30rem;width:calc(100% - 32px);border:0;border-radius:8px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3)}'
+			. '.ra-gpx-dialog::backdrop{background:rgba(0,0,0,.45)}'
+			. '.ra-gpx-dialog h2{font-size:1.25rem;margin:0 0 .25rem}'
+			. '.ra-gpx-dialog .ra-gpx-walk{font-weight:600;margin:0 0 1rem}'
+			. '.ra-gpx-dialog .ra-gpx-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:1rem}'
+			. '</style>'
+			. '<dialog class="ra-gpx-dialog" id="ra-gpx-dialog" aria-labelledby="ra-gpx-heading">'
+			. '<form method="post" enctype="multipart/form-data" action="' . $e($this->selfUrl()) . '">'
+			. '<h2 id="ra-gpx-heading">Add a GPX route</h2>'
+			. '<p class="ra-gpx-walk" id="ra-gpx-walk"></p>'
+			. '<p class="ra-gpx-note" id="ra-gpx-note" hidden>This walk already has a route. The new file will replace it.</p>'
+			. '<label for="ra-gpx-file" class="form-label">GPX file (up to ' . $maxMb . ' MB)</label>'
+			. '<input type="file" name="gpx" id="ra-gpx-file" class="form-control" accept=".gpx,application/gpx+xml,text/xml" required>'
+			. '<input type="hidden" name="walk" id="ra-gpx-id" value="">'
+			. '<input type="hidden" name="ra_past_route" value="save">'
+			. '<input type="hidden" name="' . $e(Session::getFormToken()) . '" value="1">'
+			. '<div class="ra-gpx-actions">'
+			. '<button type="button" class="btn btn-outline-secondary" id="ra-gpx-cancel">Cancel</button>'
+			. '<button type="submit" class="btn btn-primary">Attach route</button>'
+			. '</div></form></dialog>'
+			. '<script>(function(){var walks=' . $json($walks) . ';'
+			. 'var dlg=document.getElementById("ra-gpx-dialog");if(!dlg||typeof dlg.showModal!=="function"){return;}'
+			. 'document.getElementById("ra-gpx-cancel").addEventListener("click",function(){dlg.close();});'
+			. 'function open(id){var w=walks[id];document.getElementById("ra-gpx-id").value=id;'
+			. 'document.getElementById("ra-gpx-walk").textContent=w[0];'
+			. 'document.getElementById("ra-gpx-heading").textContent=w[1]?"Replace the GPX route":"Add a GPX route";'
+			. 'document.getElementById("ra-gpx-note").hidden=!w[1];'
+			. 'document.getElementById("ra-gpx-file").value="";dlg.showModal();}'
+			// The library redraws the rows on every page, tab and search change, and the
+			// template swaps in its own rows, so each new row is given its button as it appears.
+			. 'function scan(){document.querySelectorAll(".ra-past-walks .ecr-walkrow:not([data-ra-gpx])").forEach(function(row){'
+			. 'row.setAttribute("data-ra-gpx","1");var m=/displayWalkID\\(event,\'(\\d+)\'\\)/.exec(row.innerHTML);'
+			. 'if(!m||!walks[m[1]]){return;}var id=m[1],b=document.createElement("button");'
+			. 'b.type="button";b.className="btn btn-sm btn-outline-primary ra-gpx-btn";'
+			. 'b.textContent=walks[id][1]?"Replace GPX":"Add GPX";b.setAttribute("aria-label",b.textContent+": "+walks[id][0]);'
+			. 'b.addEventListener("click",function(ev){ev.preventDefault();ev.stopPropagation();open(id);});'
+			. 'row.classList.add("ra-gpx-row");row.appendChild(b);});}'
+			. 'document.addEventListener("DOMContentLoaded",function(){scan();'
+			. 'new MutationObserver(scan).observe(document.body,{childList:true,subtree:true});});})();</script>';
+	}
+
+	/** "Wed 18 Nov 2026 – Tatton Park", for the GPX form. */
+	private function walkLabel(object $item): string
+	{
+		$date = substr((string) ($item->start_date_time ?? ''), 0, 10);
+		$title = self::plainTitle($item);
+		$when = $date !== '' && strtotime($date) ? date('D j M Y', (int) strtotime($date)) : '';
+
+		return trim($when . ($when !== '' && $title !== '' ? ' – ' : '') . $title);
+	}
+
+	/** The walk's title as plain text, without the "***" leaders put on a changed walk. */
+	private static function plainTitle(object $item): string
+	{
+		$title = trim(html_entity_decode(strip_tags((string) ($item->title ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+		return trim((string) preg_replace('/^\*+\s*/', '', $title));
+	}
+
+	/**
+	 * The Add GPX form posts back to this page. The walk must be one of the past walks shown
+	 * here; the file gets the same checks as on the Upload a GPX page. Leaders may replace
+	 * any walk's route, as they can there.
+	 *
+	 * @param array<int,object> $items
+	 */
+	private function handleUpload(array $items): void
+	{
+		$app = Factory::getApplication();
+		$input = $app->getInput();
+
+		if ($input->getMethod() !== 'POST' || $input->post->getString('ra_past_route', '') !== 'save') {
+			return;
+		}
+
+		$back = $this->selfUrl();
+		$done = static function (string $message, string $type) use ($app, $back): void {
+			$app->enqueueMessage($message, $type);
+			$app->redirect($back);
+		};
+
+		if (!$this->routes->enabled() || !$this->routes->canManage()) {
+			$done('Sorry, only walk leaders can add routes to walks.', 'error');
+		}
+
+		if (!Session::checkToken('post')) {
+			$done('Sorry, that form has expired. Please try again.', 'error');
+		}
+
+		$id = (string) preg_replace('/\D/', '', $input->post->getString('walk', ''));
+		$chosen = null;
+
+		foreach ($items as $item) {
+			if ($id !== '' && (string) ($item->id ?? '') === $id) {
+				$chosen = $item;
+				break;
+			}
+		}
+
+		if ($chosen === null) {
+			$done('That walk is not in the list of past walks.', 'error');
+		}
+
+		$walk = [
+			'id' => $id,
+			'title' => self::plainTitle($chosen),
+			'date' => substr((string) ($chosen->start_date_time ?? ''), 0, 10),
+			'group' => (string) ($chosen->group_code ?? ''),
+		];
+
+		$problem = $this->routes->attachUpload($walk, (array) $input->files->get('gpx', [], 'array'));
+
+		if ($problem !== '') {
+			$done($problem, 'error');
+		}
+
+		$done('The route has been attached to "' . htmlspecialchars($this->walkLabel($chosen), ENT_QUOTES, 'UTF-8') . '".', 'message');
+	}
+
+	private function selfUrl(): string
+	{
+		$uri = clone Uri::getInstance();
+		$uri->setFragment('');
+
+		return $uri->toString(['path', 'query']);
 	}
 
 	/**
