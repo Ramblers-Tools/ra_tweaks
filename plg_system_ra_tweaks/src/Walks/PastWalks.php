@@ -126,7 +126,7 @@ final class PastWalks
 			return $this->message('Past walks could not be shown just now.');
 		}
 
-		return $this->searchBox() . (string) ob_get_clean() . $this->keepPastScript() . $this->gpxButtons($items);
+		return $this->searchBox($items) . (string) ob_get_clean() . $this->keepPastScript() . $this->gpxButtons($items);
 	}
 
 	/**
@@ -305,8 +305,11 @@ final class PastWalks
 			// The search box: after the library's own filters, a walk must also contain every
 			// word typed (see searchBox()).
 			. 'function searchable(list){var own=list.setDisplayFilter;list.setDisplayFilter=function(){own.apply(list,arguments);'
-			. 'var words=window.raPastWalksSearch||[];if(!words.length){return;}'
-			. 'list.events.forEach(function(e){if(!e._displayFiltered){return;}if(e._raText===undefined){e._raText=raWalkText(e);}'
+			. 'var words=window.raPastWalksSearch||[],only=window.raPastWalksGpxOnly?(window.raPastWalksGpx||{}):null;'
+			. 'if(!words.length&&!only){return;}'
+			. 'list.events.forEach(function(e){if(!e._displayFiltered){return;}'
+			. 'if(only&&!(e.admin&&only[e.admin.id])){e._displayFiltered=false;return;}'
+			. 'if(e._raText===undefined){e._raText=raWalkText(e);}'
 			. 'for(var i=0;i<words.length;i++){if(e._raText.indexOf(words[i])===-1){e._displayFiltered=false;return;}}});};}'
 			. 'function raWalkText(e){var parts=[e.basics.title,e.basics.description,e.basics.descriptionHtml,e.basics.additionalNotes];'
 			. '["meeting","start","finish","contacts"].forEach(function(k){((e[k]&&e[k].items)||[]).forEach(function(it){'
@@ -359,20 +362,47 @@ final class PastWalks
 	/**
 	 * A search box above the walks: leader, place, postcode, grid reference or any word in
 	 * the walk's title or description. Every word typed must appear. It feeds the library's
-	 * own filtering, so the list, calendar and map all narrow down together.
+	 * own filtering, so the list, calendar and map all narrow down together. Below it, a tick
+	 * box shows only the walks that have a GPX route on this site.
+	 *
+	 * @param array<int,object> $items
 	 */
-	private function searchBox(): string
+	private function searchBox(array $items): string
 	{
+		$has = (array) json_decode($this->routes->enabled() ? $this->routes->lookupJson() : '{}', true);
+		$withRoute = [];
+
+		foreach ($items as $item) {
+			$id = (string) ($item->id ?? '');
+
+			if ($id !== '' && isset($has[$id])) {
+				$withRoute[$id] = 1;
+			}
+		}
+
+		$gpx = '';
+
+		if ($withRoute) {
+			$gpx = '<div class="form-check ra-past-walks__gpx">'
+				. '<input class="form-check-input" type="checkbox" id="ra-past-walks-gpx" autocomplete="off">'
+				. '<label class="form-check-label" for="ra-past-walks-gpx">Only walks with a GPX route (' . \count($withRoute) . ')</label>'
+				. '</div>';
+		}
+
 		return '<div class="ra-past-walks__search">'
 			. '<label for="ra-past-walks-q" class="form-label">Search past walks</label>'
 			. '<input type="search" id="ra-past-walks-q" class="form-control" autocomplete="off"'
 			. ' placeholder="Leader, place, postcode or walk name">'
+			. $gpx
 			. '</div>'
-			. '<script>(function(){var box=document.getElementById("ra-past-walks-q"),timer=null;'
+			. '<script>(function(){window.raPastWalksGpx=' . json_encode((object) $withRoute) . ';'
+			. 'var box=document.getElementById("ra-past-walks-q"),tick=document.getElementById("ra-past-walks-gpx"),timer=null;'
 			. 'function run(){var q=box.value.toLowerCase().replace(/\\s+/g," ").trim();'
-			. 'window.raPastWalksSearch=q?q.split(" "):[];document.dispatchEvent(new Event("reDisplayWalks"));'
+			. 'window.raPastWalksSearch=q?q.split(" "):[];window.raPastWalksGpxOnly=!!(tick&&tick.checked);'
+			. 'document.dispatchEvent(new Event("reDisplayWalks"));'
 			. '}'
-			. 'box.addEventListener("input",function(){window.clearTimeout(timer);timer=window.setTimeout(run,250);});})();</script>';
+			. 'box.addEventListener("input",function(){window.clearTimeout(timer);timer=window.setTimeout(run,250);});'
+			. 'if(tick){tick.addEventListener("change",run);}})();</script>';
 	}
 
 	/**
