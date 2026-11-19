@@ -158,11 +158,13 @@ final class PastWalks
 		$maxMb = max(1, min(20, (int) $this->params->get('routes_max_mb', 5)));
 
 		return '<style>'
-			. '.ra-past-walks .ecr-walkrow.ra-gpx-row{display:flex;align-items:center;gap:12px}'
-			. '.ra-past-walks .ra-gpx-row>.ecr-walk{flex:1 1 auto;min-width:0}'
-			. '.ra-past-walks .ra-gpx-btn{flex:0 0 auto;min-width:8.5rem;white-space:nowrap}'
-			. '@media (max-width:599px){.ra-past-walks .ecr-walkrow.ra-gpx-row{flex-wrap:wrap;justify-content:flex-end;gap:6px}'
-			. '.ra-past-walks .ra-gpx-row>.ecr-walk{flex-basis:100%}}'
+			// The button sits over the right of the walk's card (it cannot go inside the card,
+			// which is a link that opens the popup); the card keeps room for it.
+			. '.ra-past-walks .ecr-walkrow.ra-gpx-row{position:relative}'
+			. '.ra-past-walks .ra-gpx-row>.ecr-walk{padding-right:calc(8.5rem + 32px)}'
+			. '.ra-past-walks .ra-gpx-btn{position:absolute;right:16px;top:50%;transform:translateY(-50%);min-width:8.5rem;white-space:nowrap;z-index:1}'
+			. '@media (max-width:599px){.ra-past-walks .ra-gpx-row>.ecr-walk{padding-right:16px;padding-bottom:56px}'
+			. '.ra-past-walks .ra-gpx-btn{top:auto;bottom:12px;transform:none}}'
 			. '.ra-gpx-dialog{max-width:30rem;width:calc(100% - 32px);border:0;border-radius:8px;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,.3)}'
 			. '.ra-gpx-dialog::backdrop{background:rgba(0,0,0,.45)}'
 			. '.ra-gpx-dialog h2{font-size:1.25rem;margin:0 0 .25rem}'
