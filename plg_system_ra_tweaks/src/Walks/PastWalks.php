@@ -113,6 +113,8 @@ final class PastWalks
 		ob_start();
 
 		try {
+			// As RJsonwalksFeed::display() does: the popup and other library parts need it.
+			\RLoad::addStyleSheet('media/lib_ramblers/css/ramblerslibrary.css');
 			(new \RJsonwalksStdDisplay())->DisplayWalks($walks);
 		} catch (\Throwable $e) {
 			ob_end_clean();
