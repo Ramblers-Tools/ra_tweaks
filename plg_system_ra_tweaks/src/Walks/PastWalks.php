@@ -162,7 +162,7 @@ final class PastWalks
 			. 'if(!header){if(tries<40){window.setTimeout(function(){add(id,tries+1);},100);}return;}'
 			. 'if(header.querySelector(".ra-tweaks-photos-button")){return;}'
 			. 'var first=header.firstChild;(albums[id]||[]).forEach(function(url,i){var a=document.createElement("a");'
-			. 'a.className="link-button tiny cloudy ra-tweaks-photos-button";a.textContent=i?"Photos "+(i+1):"Photos";a.href=url;'
+			. 'a.className="link-button tiny cloudy ra-tweaks-photos-button";a.textContent=i?"Photos "+(i+1):"Photos";a.href=url;a.setAttribute("data-ecr-href",url);var h=document.querySelector(".js-modal .walktitle");if(h){a.setAttribute("data-ecr-title",h.textContent.replace(/\\s+/g," ").trim());}'
 			. 'a.style.marginRight="0.5em";header.insertBefore(a,first);});}'
 			. 'function wrap(){if(!window.ra||!ra.walk||typeof ra.walk.displayWalkID!=="function"){return false;}'
 			. 'if(ra.walk.displayWalkID.raPhotosWrapped){return true;}var original=ra.walk.displayWalkID;'
