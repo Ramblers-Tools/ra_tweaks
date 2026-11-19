@@ -181,7 +181,8 @@ final class PastWalks
 	}
 
 	/**
-	 * Print and Add to Calendar make no sense for walks that have happened. The library draws
+	 * Print and Add to Calendar make no sense for walks that have happened, and the Map tab's
+	 * "where our walks are going to be" becomes "where our walks have been". The library draws
 	 * them (in the list, and in the walk popup's header) without a class of their own, and
 	 * draws them again whenever a tab or filter changes, so they are hidden by their label.
 	 */
@@ -189,7 +190,11 @@ final class PastWalks
 	{
 		return '<script>(function(){var labels=["Print","Add to Calendar"];'
 			. 'function hide(){document.querySelectorAll(".ra-past-walks button,.ra-modal-header button").forEach(function(b){'
-			. 'if(b.style.display!=="none"&&labels.indexOf((b.textContent||"").trim())!==-1){b.style.display="none";}});}'
+			. 'if(b.style.display!=="none"&&labels.indexOf((b.textContent||"").trim())!==-1){b.style.display="none";}});'
+			// The Map tab's help line is written for coming walks.
+			. 'document.querySelectorAll(".ra-past-walks p").forEach(function(p){'
+			. 'if(p.textContent.indexOf("where our walks are going to be")===-1){return;}'
+			. 'p.childNodes.forEach(function(t){if(t.nodeType===3){t.nodeValue=t.nodeValue.replace("where our walks are going to be","where our walks have been");}});});}'
 			. 'document.addEventListener("DOMContentLoaded",function(){hide();'
 			. 'new MutationObserver(hide).observe(document.body,{childList:true,subtree:true});});})();</script>';
 	}
