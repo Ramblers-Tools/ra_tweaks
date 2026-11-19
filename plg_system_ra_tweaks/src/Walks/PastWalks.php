@@ -147,7 +147,37 @@ final class PastWalks
 			. 'this.addYear=function(){return " "+ra.date.YYYY(ra.date.getDateTime(self.walkDate));};};'
 			. 'ra.event.basics.prototype=Basics.prototype;}'
 			. '});</script>'
-			. $this->hideButtonsScript();
+			. $this->hideButtonsScript() . $this->osMapScript();
+	}
+
+	/**
+	 * Maps on this page (the Map tab and the map in each walk popup) open on the same layer
+	 * as the walk route pages: the plugin's "Default map" setting, OS Explorer/Landranger
+	 * unless changed. The library draws each map only when it is shown, so every new layer
+	 * switcher is set once as it appears. Explorer/Landranger is switched off at some zoom
+	 * levels; then the Ordnance Survey (vector) layer is used.
+	 */
+	private function osMapScript(): string
+	{
+		$layer = trim((string) $this->params->get('routes_default_map', 'OS Explorer/Landranger'));
+
+		if ($layer === '' || $layer === 'Open Street Map') {
+			return '';
+		}
+
+		$name = json_encode($layer, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+
+		return '<script>(function(){var want=' . $name . ';'
+			. 'function find(box,n){var labels=box.querySelectorAll("label");'
+			. 'for(var i=0;i<labels.length;i++){if(labels[i].textContent.trim()===n){return labels[i].querySelector("input");}}return null;}'
+			. 'function pick(box,tries){var input=find(box,want);'
+			. 'if(input&&!input.disabled){if(!input.checked){input.click();}return;}'
+			. 'if(tries>=12){var other=find(box,"Ordnance Survey");if(other&&!other.disabled&&!other.checked){other.click();}return;}'
+			. 'window.setTimeout(function(){pick(box,tries+1);},250);}'
+			. 'function scan(){document.querySelectorAll(".leaflet-control-layers-base").forEach(function(box){'
+			. 'if(box.getAttribute("data-ra-os")){return;}box.setAttribute("data-ra-os","1");pick(box,0);});}'
+			. 'document.addEventListener("DOMContentLoaded",function(){scan();'
+			. 'new MutationObserver(scan).observe(document.body,{childList:true,subtree:true});});})();</script>';
 	}
 
 	/**
