@@ -17,6 +17,7 @@ use Joomla\CMS\Plugin\CMSPlugin;
 use Joomla\Database\DatabaseInterface;
 use Joomla\Event\SubscriberInterface;
 use Ramblerseastcheshire\Plugin\System\RaTweaks\Routes\WalkRoutes;
+use Ramblerseastcheshire\Plugin\System\RaTweaks\Walks\PastWalks;
 
 /**
  * Colours changed Ramblers walk items in the final rendered page output.
@@ -78,7 +79,8 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 	}
 
 	/**
-	 * Replace {ra_walk_route_upload} and {ra_walk_route} in articles with the route pages.
+	 * Replace {ra_walk_route_upload} and {ra_walk_route} in articles with the route pages, and
+	 * {ra_past_walks} with the group's past walks.
 	 *
 	 * @param mixed $eventOrContext Joomla 5 event object, or the context string on Joomla 4.4
 	 * @param mixed $item           The article (or other item) being prepared
@@ -99,7 +101,12 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 			return;
 		}
 
-		$item->text = $this->walkRoutes()->replaceShortcodes($item->text);
+		$routes = $this->walkRoutes();
+		$item->text = $routes->replaceShortcodes($item->text);
+
+		if (strpos($item->text, PastWalks::SHORTCODE) !== false) {
+			$item->text = (new PastWalks($this->params, Factory::getContainer()->get(DatabaseInterface::class), $routes))->replaceShortcode($item->text);
+		}
 	}
 
 	/**

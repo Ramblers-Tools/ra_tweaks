@@ -390,6 +390,24 @@ JS . '</script>';
 
 		$out .= '<h3>Routes already attached</h3>';
 
+		// Routes are kept for ever, so the table shows upcoming walks and the last three
+		// months unless all are asked for.
+		$showAll = $this->app->getInput()->getInt('all', 0) === 1;
+		$hidden = 0;
+
+		if (!$showAll) {
+			$since = Factory::getDate('-90 days')->format('Y-m-d');
+			$all = $routes;
+			$routes = array_filter($routes, static fn ($row): bool => empty($row->walk_date) || (string) $row->walk_date >= $since);
+			$hidden = \count($all) - \count($routes);
+		}
+
+		if ($hidden > 0) {
+			$out .= '<p>Showing upcoming walks and the last three months. <a href="'
+				. $this->e($this->selfUrl() . (strpos($this->selfUrl(), '?') === false ? '?' : '&') . 'all=1')
+				. '">Show all ' . ($hidden + \count($routes)) . ' routes</a>.</p>';
+		}
+
 		if (!$routes) {
 			$out .= '<p>None yet.</p>';
 		} else {
@@ -469,6 +487,30 @@ JS . '</script>';
 		}
 
 		$this->finish('The route has been attached to "' . $chosen['title'] . '".', 'message');
+	}
+
+	/**
+	 * Attach an uploaded GPX file to a walk (replacing any route it has), with the same checks
+	 * as the upload page. For other pages that offer uploads, such as the past walks list.
+	 *
+	 * @param array{id:string,title:string,date:string,group:string} $walk
+	 * @return string '' when attached, otherwise a message for the leader
+	 */
+	public function attachUpload(array $walk, array $upload): string
+	{
+		$problem = $this->validateUpload($upload);
+
+		if ($problem !== '') {
+			return $problem;
+		}
+
+		$this->ensureTable();
+
+		if (!$this->store($walk, (string) file_get_contents((string) $upload['tmp_name']))) {
+			return 'Sorry, the route could not be saved.';
+		}
+
+		return '';
 	}
 
 	/** Returns '' when the upload is a usable GPX file, otherwise a message for the leader. */
@@ -762,8 +804,14 @@ JS . '</script>';
 		@touch($marker);
 
 		try {
+			$days = (int) $this->params->get('routes_keep_days', 0);
+
+			// 0 keeps routes for ever (past walks keep their routes).
+			if ($days <= 0) {
+				return;
+			}
+
 			$this->ensureTable();
-			$days = max(1, (int) $this->params->get('routes_keep_days', 30));
 			$cutoff = Factory::getDate('-' . $days . ' days')->format('Y-m-d');
 			$query = $this->db->getQuery(true)
 				->select('*')
@@ -855,7 +903,7 @@ JS . '</script>';
 		return [$walks, ''];
 	}
 
-	private function groupCodes(): string
+	public function groupCodes(): string
 	{
 		$codes = strtoupper(preg_replace('/[^A-Za-z0-9,]/', '', (string) $this->params->get('routes_group_codes', '')));
 
@@ -878,13 +926,13 @@ JS . '</script>';
 		}
 	}
 
-	private function feedBase(): string
+	public function feedBase(): string
 	{
 		return \defined('WALKMANAGER') ? (string) WALKMANAGER : 'https://walks-manager.ramblers.org.uk/api/volunteers/walksevents?';
 	}
 
 	/** The Ramblers library carries the Walks Manager key, so use the same one the walk pages use. */
-	private function apiKey(): string
+	public function apiKey(): string
 	{
 		if (\defined('APIKEY')) {
 			return (string) APIKEY;
