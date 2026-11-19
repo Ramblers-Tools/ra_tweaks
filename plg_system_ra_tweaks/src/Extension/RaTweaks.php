@@ -780,7 +780,7 @@ JS;
 	private function isIgnoredTextNode(\DOMText $node): bool
 	{
 		for ($current = $node->parentNode; $current instanceof \DOMElement; $current = $current->parentNode) {
-			if (in_array(strtolower($current->nodeName), ['script', 'style', 'textarea', 'title'], true)) {
+			if (in_array(strtolower($current->nodeName), ['script', 'style', 'textarea', 'title', 'select', 'option', 'optgroup'], true)) {
 				return true;
 			}
 		}
@@ -1494,7 +1494,7 @@ function(config) {
 				return true;
 			}
 
-			if (["script", "style", "textarea", "title"].indexOf(name) !== -1) {
+			if (["script", "style", "textarea", "title", "select", "option", "optgroup"].indexOf(name) !== -1) {
 				return true;
 			}
 
