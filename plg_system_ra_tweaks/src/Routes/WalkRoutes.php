@@ -675,9 +675,7 @@ JS . '</script>';
 			return false;
 		}
 
-		if (!is_file($dir . '/index.html')) {
-			@file_put_contents($dir . '/index.html', '<!DOCTYPE html><title></title>');
-		}
+		$this->folderFiles($dir);
 
 		$file = 'walk-' . $walk['id'] . '-' . bin2hex(random_bytes(4)) . '.gpx';
 
@@ -811,6 +809,34 @@ JS . '</script>';
 	 * Remove routes for walks that took place more than routes_keep_days ago. Checked at most
 	 * once a day, from the popup lookup.
 	 */
+	/**
+	 * The folder's index.html, and an .htaccess so every browser saves a GPX file rather than
+	 * showing it as text (the map library's Download link has no download attribute, and some
+	 * browsers ignore it anyway). Apache only; other servers just skip it.
+	 */
+	public function folderFiles(?string $dir = null): void
+	{
+		$dir = $dir ?? JPATH_ROOT . '/' . self::FOLDER;
+
+		if (!is_dir($dir)) {
+			return;
+		}
+
+		if (!is_file($dir . '/index.html')) {
+			@file_put_contents($dir . '/index.html', '<!DOCTYPE html><title></title>');
+		}
+
+		$htaccess = "# RA Tweaks: GPX files download rather than open as text.\n"
+			. "<FilesMatch \"\\.gpx$\">\n"
+			. "\t<IfModule mod_mime.c>\n\t\tForceType application/gpx+xml\n\t</IfModule>\n"
+			. "\t<IfModule mod_headers.c>\n\t\tHeader set Content-Disposition attachment\n\t</IfModule>\n"
+			. "</FilesMatch>\n";
+
+		if (!is_file($dir . '/.htaccess') || (string) @file_get_contents($dir . '/.htaccess') !== $htaccess) {
+			@file_put_contents($dir . '/.htaccess', $htaccess);
+		}
+	}
+
 	private function tidyOncePerDay(): void
 	{
 		$marker = JPATH_ROOT . '/' . self::FOLDER . '/.last-tidy';
@@ -824,6 +850,7 @@ JS . '</script>';
 		}
 
 		@touch($marker);
+		$this->folderFiles();
 
 		try {
 			$days = (int) $this->params->get('routes_keep_days', 0);

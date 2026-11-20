@@ -531,6 +531,8 @@ final class Recordings
 			return null;
 		}
 
+		$this->routes->folderFiles($dir);
+
 		// A long random part: a recording that isn't shown can't be found by guessing its name.
 		$file = 'walked-' . $walk['id'] . '-' . bin2hex(random_bytes(12)) . '.gpx';
 		$xml = $this->routes->withElevation(self::gpx($walk['title'], $points));
