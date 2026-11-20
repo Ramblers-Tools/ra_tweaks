@@ -16,6 +16,7 @@ use Joomla\CMS\Menu\AdministratorMenuItem;
 use Joomla\CMS\Plugin\CMSPlugin;
 use Joomla\Database\DatabaseInterface;
 use Joomla\Event\SubscriberInterface;
+use Ramblerseastcheshire\Plugin\System\RaTweaks\Forms\EmailCaptcha;
 use Ramblerseastcheshire\Plugin\System\RaTweaks\Routes\WalkRoutes;
 use Ramblerseastcheshire\Plugin\System\RaTweaks\Walks\PastWalks;
 
@@ -39,6 +40,8 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 			'onBeforeCompileHead' => 'onBeforeCompileHead',
 			'onContentPrepare' => 'onContentPrepare',
 			'onAjaxRa_tweaks' => 'onAjaxRa_tweaks',
+			'onContentPrepareForm' => 'onContentPrepareForm',
+			'onBeforeRender' => 'onBeforeRender',
 		];
 	}
 
@@ -106,6 +109,38 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 
 		if (strpos($item->text, PastWalks::SHORTCODE) !== false) {
 			$item->text = (new PastWalks($this->params, Factory::getContainer()->get(DatabaseInterface::class), $routes))->replaceShortcode($item->text);
+		}
+	}
+
+	/**
+	 * The Ramblers Tools email form (contact Email buttons) gets the site's captcha.
+	 *
+	 * @param mixed $eventOrForm
+	 */
+	public function onContentPrepareForm($eventOrForm = null, $data = null): void
+	{
+		if (!$this->app->isClient('site') || !(int) $this->params->get('email_form_captcha', 1)) {
+			return;
+		}
+
+		$form = $eventOrForm;
+
+		if (\is_object($eventOrForm) && method_exists($eventOrForm, 'getForm')) {
+			$form = $eventOrForm->getForm();
+		} elseif (\is_object($eventOrForm) && method_exists($eventOrForm, 'getArgument')) {
+			$form = $eventOrForm->getArgument('subject') ?? $eventOrForm->getArgument(0);
+		}
+
+		(new EmailCaptcha($this->app))->addField($form);
+	}
+
+	/**
+	 * Shows that captcha in the email form (its layout has no place for one).
+	 */
+	public function onBeforeRender(): void
+	{
+		if ($this->app->isClient('site') && (int) $this->params->get('email_form_captcha', 1)) {
+			(new EmailCaptcha($this->app))->render();
 		}
 	}
 
