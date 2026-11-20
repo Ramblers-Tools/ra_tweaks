@@ -172,12 +172,16 @@ final class Recordings
 			$this->json(500, ['error' => 'Sorry, the route could not be saved. Please try again later.']);
 		}
 
-		$shown = (int) $row->shown === 1;
+		// The leader's planned route always wins, so a walk with one shows no recording.
+		$planned = $this->routes->hasRoute($walkId);
+		$shown = (int) $row->shown === 1 && !$planned;
 
 		$this->json(200, [
 			'message' => $shown
 				? 'Thanks, your route was added. It is the one shown for this walk.'
-				: 'Thanks, your route was added.',
+				: ($planned
+					? 'Thanks, your route was added. The walk leader\'s planned route is shown for this walk, so yours is kept but not shown.'
+					: 'Thanks, your route was added.'),
 			'shown' => $shown,
 			'route' => array_filter([
 				'kind' => 'walked',
@@ -612,10 +616,10 @@ final class Recordings
 		return (array) $this->db->setQuery($query)->loadObjectList();
 	}
 
-	/** The recording shown for a walk, or null. */
+	/** The recording shown for a walk, or null (always null when the walk has a planned route). */
 	public function shownFor(string $walkId): ?object
 	{
-		if (!$this->enabled()) {
+		if (!$this->enabled() || $this->routes->hasRoute($walkId)) {
 			return null;
 		}
 
@@ -634,7 +638,7 @@ final class Recordings
 		}
 	}
 
-	/** @return array<string,string> walk id => file of the shown recording */
+	/** @return array<string,string> walk id => file of the shown recording, for walks with no planned route */
 	public function shownFiles(): array
 	{
 		if (!$this->enabled()) {
@@ -644,9 +648,11 @@ final class Recordings
 		try {
 			$this->ensureTable();
 			$query = $this->db->getQuery(true)
-				->select($this->db->quoteName(['walk_id', 'file']))
-				->from($this->db->quoteName(self::TABLE))
-				->where($this->db->quoteName('shown') . ' = 1');
+				->select('r.walk_id, r.file')
+				->from($this->db->quoteName(self::TABLE, 'r'))
+				->join('LEFT', $this->db->quoteName('#__ra_tweaks_walk_routes', 'p') . ' ON p.walk_id = r.walk_id')
+				->where('r.shown = 1')
+				->where('p.walk_id IS NULL');
 			$out = [];
 
 			foreach ((array) $this->db->setQuery($query)->loadObjectList() as $row) {
@@ -678,7 +684,7 @@ final class Recordings
 			$page = rtrim(Uri::root(), '/') . '/' . ltrim($page, '/');
 		}
 
-		return $page . (strpos($page, '?') === false ? '?' : '&') . 'walk=' . rawurlencode($walkId) . '&route=walked';
+		return $page . (strpos($page, '?') === false ? '?' : '&') . 'walk=' . rawurlencode($walkId);
 	}
 
 	// ---------------------------------------------------------------- the website page
@@ -722,9 +728,10 @@ final class Recordings
 		}
 
 		$query = $this->db->getQuery(true)
-			->select('r.*, u.name AS recorder')
+			->select('r.*, u.name AS recorder, p.walk_id AS planned')
 			->from($this->db->quoteName(self::TABLE, 'r'))
 			->join('LEFT', $this->db->quoteName('#__users', 'u') . ' ON u.id = r.user_id')
+			->join('LEFT', $this->db->quoteName('#__ra_tweaks_walk_routes', 'p') . ' ON p.walk_id = r.walk_id')
 			->order('r.walk_date DESC, r.walk_id, r.shown DESC, r.uploaded ASC');
 
 		if (!$manager) {
@@ -735,8 +742,8 @@ final class Recordings
 		$token = Session::getFormToken();
 		$self = $this->selfUrl();
 		$out = $manager
-			? '<p>Routes members recorded with the app. The one marked <strong>Shown</strong> is on the website as the route walked, without the name of who recorded it.</p>'
-			: '<p>Routes you recorded with the app. The one marked <strong>Shown</strong> is on the website as the route walked, without your name. You can delete yours at any time.</p>';
+			? '<p>Routes members recorded with the app. The one marked <strong>Shown</strong> is on the website as the route walked, without the name of who recorded it. A walk with a planned route shows that instead, and none of its recordings.</p>'
+			: '<p>Routes you recorded with the app. The one marked <strong>Shown</strong> is on the website as the route walked, without your name. A walk with a planned route shows that instead. You can delete yours at any time.</p>';
 
 		if ($rows === []) {
 			return $out . '<p>None yet.</p>';
@@ -747,7 +754,9 @@ final class Recordings
 
 		foreach ($rows as $row) {
 			$file = WalkRoutes::fileUrl((string) $row->file);
-			$view = (int) $row->shown === 1 ? $this->pageUrl((string) $row->walk_id, false) : null;
+			$hasPlan = !empty($row->planned);
+			$shown = (int) $row->shown === 1 && !$hasPlan;
+			$view = $shown ? $this->pageUrl((string) $row->walk_id, false) : null;
 			$form = static fn (string $action, string $label, string $class, string $confirm = ''): string => '<form method="post" action="' . htmlspecialchars($self, ENT_QUOTES, 'UTF-8') . '" style="display:inline"'
 				. ($confirm !== '' ? ' onsubmit="return confirm(\'' . $confirm . '\');"' : '') . '>'
 				. '<input type="hidden" name="ra_recording" value="' . $action . '">'
@@ -755,13 +764,13 @@ final class Recordings
 				. '<input type="hidden" name="' . htmlspecialchars($token, ENT_QUOTES, 'UTF-8') . '" value="1">'
 				. '<button type="submit" class="btn btn-sm ' . $class . '">' . $label . '</button></form> ';
 
-			$out .= '<tr><td>' . $this->e((string) $row->title) . ((int) $row->shown === 1 ? ' <strong>(Shown)</strong>' : '') . '</td>'
+			$out .= '<tr><td>' . $this->e((string) $row->title) . ($shown ? ' <strong>(Shown)</strong>' : ($hasPlan ? ' (planned route shown instead)' : '')) . '</td>'
 				. '<td>' . $this->e($row->walk_date ? date('D j M Y', (int) strtotime($row->walk_date . ' 12:00')) : '') . '</td>'
 				. ($manager ? '<td>' . $this->e((string) ($row->recorder ?? '')) . '</td>' : '')
 				. '<td>' . number_format(((int) $row->metres) / 1609.344, 1) . ' miles</td>'
 				. '<td>' . ($view ? '<a href="' . $this->e($view) . '">View</a> &middot; ' : '')
 				. '<a href="' . $this->e($file) . '" download>Download</a></td><td>'
-				. ($manager && (int) $row->shown !== 1 ? $form('show', 'Show this one', 'btn-outline-primary') : '')
+				. ($manager && !$shown && !$hasPlan ? $form('show', 'Show this one', 'btn-outline-primary') : '')
 				. ($manager || (int) $row->user_id === (int) $user->id ? $form('delete', 'Delete', 'btn-outline-danger', 'Delete this recorded route?') : '')
 				. '</td></tr>';
 		}

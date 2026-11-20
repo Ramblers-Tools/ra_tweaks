@@ -140,28 +140,15 @@ final class WalkRoutes
 			return '<p>No walk was chosen. Open a walk from the walks list and choose View route.</p>';
 		}
 
-		// The planned route, unless the route walked is asked for or is all there is.
+		// The planned route always wins; a members' recording is shown only for a walk without one.
 		$planned = $this->find($id);
-		$walked = (new Recordings($this->params, $this->app, $this->db, $this))->shownFor($id);
-		$wantWalked = $this->app->getInput()->getCmd('route', '') === 'walked';
-		$row = ($wantWalked && $walked) || !$planned ? $walked : $planned;
+		$row = $planned ?: (new Recordings($this->params, $this->app, $this->db, $this))->shownFor($id);
 
 		if ($row === null) {
 			return '<p>Sorry, there is no route for that walk. It may have been removed after the walk took place.</p>';
 		}
 
-		$isWalked = $row === $walked;
-		$other = '';
-
-		if ($planned && $walked) {
-			$uri = clone Uri::getInstance();
-			$uri->setFragment('');
-			$uri->setVar('walk', $id);
-			$isWalked ? $uri->delVar('route') : $uri->setVar('route', 'walked');
-			$link = $uri->toString(['path', 'query']);
-			$other = '<p class="ra-walk-route-other"><a href="' . $this->e($link) . '">'
-				. ($isWalked ? 'See the planned route' : 'See the route walked') . '</a></p>';
-		}
+		$isWalked = $planned === null;
 
 		if (!class_exists('RLeafletGpxMap')) {
 			return '<p>The route map needs the Ramblers library, which is not available on this site.</p>';
@@ -180,7 +167,6 @@ final class WalkRoutes
 			$html .= '<p class="ra-walk-route-kind">Route walked, recorded on the day with the Ramblers Tools app.</p>';
 		}
 
-		$html .= $other;
 
 		ob_start();
 
@@ -535,6 +521,12 @@ JS . '</script>';
 		}
 
 		return '';
+	}
+
+	/** Whether a walk has a planned route (a leader's upload), which always wins over recordings. */
+	public function hasRoute(string $walkId): bool
+	{
+		return $this->find($walkId) !== null;
 	}
 
 	/** Returns '' when the upload is a usable GPX file, otherwise a message for the leader. */
