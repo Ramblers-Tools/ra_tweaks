@@ -67,12 +67,12 @@ final class WalkRoutes
 	/**
 	 * com_ajax task=routes: walk id => file name, as JSON, for the popup script.
 	 */
-	public function lookupJson(): string
+	public function lookupJson(bool $withRecordings = true): string
 	{
 		$this->tidyOncePerDay();
 
 		// A walk with no planned route offers the route walked, when a member recorded one.
-		$map = (new Recordings($this->params, $this->app, $this->db, $this))->shownFiles();
+		$map = $withRecordings ? (new Recordings($this->params, $this->app, $this->db, $this))->shownFiles() : [];
 
 		try {
 			$this->ensureTable();
@@ -561,7 +561,8 @@ JS . '</script>';
 	/** A GPX document with at least two points and no entity tricks. */
 	private function validGpx(string $xml): bool
 	{
-		if ($xml === '' || stripos($xml, '<!DOCTYPE') !== false || stripos($xml, '<!ENTITY') !== false) {
+		// A NUL byte means UTF-16 or similar, where the DOCTYPE check below would not see a DOCTYPE.
+		if ($xml === '' || strpos($xml, "\0") !== false || stripos($xml, '<!DOCTYPE') !== false || stripos($xml, '<!ENTITY') !== false) {
 			return false;
 		}
 
@@ -744,7 +745,7 @@ JS . '</script>';
 
 	// ---------------------------------------------------------------- data
 
-	private function ensureTable(): void
+	public function ensureTable(): void
 	{
 		if ($this->tableChecked) {
 			return;
@@ -871,7 +872,12 @@ JS . '</script>';
 			return [[], 'The walks feed key could not be found, so the list of walks is unavailable.'];
 		}
 
-		$cache = JPATH_CACHE . '/ra_tweaks_walks_' . md5($groups) . '.json';
+		// Only what the upload page needs is kept: the cache folder can be reached from the web.
+		$cache = JPATH_CACHE . '/ra_tweaks_walks2_' . md5($groups) . '.json';
+
+		foreach ((array) glob(JPATH_CACHE . '/ra_tweaks_walks_*.json') as $old) {
+			@unlink((string) $old);
+		}
 		$body = null;
 
 		if (is_file($cache) && filemtime($cache) > time() - 600) {
@@ -896,6 +902,19 @@ JS . '</script>';
 				return [[], 'The list of walks could not be fetched from Walks Manager just now. Please try again in a few minutes.'];
 			}
 
+			$slim = [];
+
+			foreach ((array) (json_decode($body, true)['data'] ?? []) as $w) {
+				$slim[] = [
+					'id' => $w['id'] ?? '',
+					'title' => $w['title'] ?? '',
+					'start_date_time' => $w['start_date_time'] ?? '',
+					'group_code' => $w['group_code'] ?? '',
+					'status' => $w['status'] ?? '',
+				];
+			}
+
+			$body = (string) json_encode(['data' => $slim]);
 			@file_put_contents($cache, $body);
 		}
 

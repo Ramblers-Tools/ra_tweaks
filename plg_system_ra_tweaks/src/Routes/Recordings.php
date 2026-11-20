@@ -124,6 +124,10 @@ final class Recordings
 			$this->json(422, ['error' => 'The walk was not given.']);
 		}
 
+		if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $walkDate)) {
+			$this->json(422, ['error' => 'The date of the recording was not given.']);
+		}
+
 		[$walk, $feedError] = $this->recentWalk($walkId);
 
 		if ($feedError !== '') {
@@ -131,7 +135,11 @@ final class Recordings
 		}
 
 		if ($walk === null) {
-			$this->json(404, ['error' => 'That walk could not be found.']);
+			$this->json(404, ['error' => 'That walk could not be found among the group\'s walks of the last month.']);
+		}
+
+		if ($walk['cancelled']) {
+			$this->json(422, ['error' => 'That walk was cancelled.']);
 		}
 
 		$today = (new \DateTimeImmutable('today', new \DateTimeZone('Europe/London')))->format('Y-m-d');
@@ -145,7 +153,7 @@ final class Recordings
 			$this->json(409, ['error' => 'Routes can only be sent up to ' . self::DAYS . ' days after the walk.']);
 		}
 
-		if ($walkDate !== '' && $walkDate !== $walk['date']) {
+		if ($walkDate !== $walk['date']) {
 			$this->json(422, ['error' => 'This recording was not made on the day of the walk.']);
 		}
 
@@ -201,7 +209,12 @@ final class Recordings
 		}
 
 		$error = null;
-		$user = $class::user(self::SCOPE, $error);
+
+		try {
+			$user = $class::user(self::SCOPE, $error);
+		} catch (\Throwable $e) {
+			$this->json(503, ['error' => 'App sign-in is not available just now. Please try again later.']);
+		}
 
 		if ($user === null) {
 			$this->json($error === 'insufficient_scope' ? 403 : 401, ['error' => (string) $error]);
@@ -240,7 +253,9 @@ final class Recordings
 			return [[], 'That does not look like a valid GPX file.'];
 		}
 
-		$nodes = $doc->xpath('//*[local-name()="trkpt"]') ?: $doc->xpath('//*[local-name()="rtept"]') ?: [];
+		// Track points (or route points) in their proper place only, not ones inside extensions.
+		$nodes = $doc->xpath('/*[local-name()="gpx"]/*[local-name()="trk"]/*[local-name()="trkseg"]/*[local-name()="trkpt"]')
+			?: $doc->xpath('/*[local-name()="gpx"]/*[local-name()="rte"]/*[local-name()="rtept"]') ?: [];
 
 		if (\count($nodes) > self::MAX_POINTS) {
 			return [[], 'The route has too many points (the limit is ' . number_format(self::MAX_POINTS) . ').'];
@@ -252,23 +267,24 @@ final class Recordings
 			$lat = (string) $node['lat'];
 			$lon = (string) $node['lon'];
 
-			if (!is_numeric($lat) || !is_numeric($lon)) {
-				continue;
+			if (!is_numeric($lat) || !is_numeric($lon) || !is_finite((float) $lat) || !is_finite((float) $lon)) {
+				return [[], 'The route has a point with a broken position.'];
 			}
 
 			$lat = (float) $lat;
 			$lon = (float) $lon;
 
-			// In or near Great Britain.
-			if ($lat < 49.8 || $lat > 60.95 || $lon < -8.7 || $lon > 1.8) {
+			if (!self::inGreatBritain($lat, $lon)) {
 				return [[], 'The route is not in Great Britain.'];
 			}
 
 			$ele = null;
 
 			foreach ($node->children() as $child) {
-				if (strtolower($child->getName()) === 'ele' && is_numeric(trim((string) $child))) {
-					$ele = (float) trim((string) $child);
+				$value = trim((string) $child);
+
+				if (strtolower($child->getName()) === 'ele' && is_numeric($value) && is_finite((float) $value) && abs((float) $value) < 10000) {
+					$ele = (float) $value;
 				}
 			}
 
@@ -279,13 +295,28 @@ final class Recordings
 	}
 
 	/**
+	 * Great Britain and its islands, roughly: a box, less the island of Ireland (west of 5.4°W
+	 * between 51.4°N and 55.25°N). A sanity check; the start check ties a track to the walk.
+	 */
+	public static function inGreatBritain(float $lat, float $lon): bool
+	{
+		if ($lat < 49.8 || $lat > 60.95 || $lon < -8.7 || $lon > 1.8) {
+			return false;
+		}
+
+		return !($lat > 51.4 && $lat < 55.25 && $lon < -5.4);
+	}
+
+	/**
 	 * Cuts the track back to the walk: from the first point within TRIM_METRES of the start (or
-	 * meeting point) to the last point within TRIM_METRES of the finish. A track that never comes
-	 * that close is kept from its first point (or to its last) only if that point is within
-	 * NEAR_METRES; otherwise it's refused.
+	 * meeting point) to the last point anywhere in the track within TRIM_METRES of the finish. A
+	 * track that never comes that close to the start (or finish) is kept from its first point (or
+	 * to its last) only if that point is within NEAR_METRES; otherwise it's refused. The finish
+	 * must come after the start.
 	 *
 	 * @param array<int,array{0:float,1:float}> $starts   The walk's start and meeting points
-	 * @param array<int,array{0:float,1:float}> $finishes The walk's finish (its start, for a circular walk)
+	 * @param array<int,array{0:float,1:float}> $finishes The walk's finish: its start for a circular walk,
+	 *                                                   its end for a linear one (none: refused)
 	 * @return array{0: array, 1: string}
 	 */
 	public static function trim(array $points, array $starts, array $finishes): array
@@ -322,10 +353,13 @@ final class Recordings
 			$first = 0;
 		}
 
-		$finishes = $finishes ?: $starts;
+		if ($finishes === []) {
+			return [[], 'The walk has no finish point in Walks Manager, so the route cannot be checked.'];
+		}
+
 		$last = null;
 
-		for ($i = $count - 1; $i > $first; $i--) {
+		for ($i = $count - 1; $i >= 0; $i--) {
 			if ($near($points[$i], $finishes) <= self::TRIM_METRES) {
 				$last = $i;
 				break;
@@ -338,6 +372,10 @@ final class Recordings
 			}
 
 			$last = $count - 1;
+		}
+
+		if ($last <= $first) {
+			return [[], 'The route does not go from the walk\'s start to its finish.'];
 		}
 
 		$kept = \array_slice($points, $first, $last - $first + 1);
@@ -419,10 +457,15 @@ final class Recordings
 		$tz = new \DateTimeZone('Europe/London');
 		$from = (new \DateTimeImmutable('today -30 days', $tz))->format('Y-m-d');
 		$to = (new \DateTimeImmutable('today', $tz))->format('Y-m-d');
-		$cache = JPATH_CACHE . '/ra_tweaks_recent_' . md5($groups . $to) . '.json';
-		$body = is_file($cache) && filemtime($cache) > time() - 600 ? (string) file_get_contents($cache) : '';
+		// Only what the checks need is kept: the cache folder can be reached from the web.
+		$cache = JPATH_CACHE . '/ra_tweaks_recent2_' . md5($groups) . '.json';
+		$items = is_file($cache) && filemtime($cache) > time() - 600 ? json_decode((string) file_get_contents($cache), true) : null;
 
-		if ($body === '') {
+		foreach ((array) glob(JPATH_CACHE . '/ra_tweaks_recent_*.json') as $old) {
+			@unlink((string) $old);
+		}
+
+		if (!\is_array($items)) {
 			$url = $this->routes->feedBase() . 'api-key=' . rawurlencode($key) . '&types=group-walk&groups=' . rawurlencode($groups)
 				. '&date=' . $from . '&date_end=' . $to . '&limit=300';
 
@@ -433,16 +476,10 @@ final class Recordings
 				$body = '';
 			}
 
-			if ($body === '') {
+			$data = $body === '' ? null : json_decode($body, true);
+
+			if (!\is_array($data) || !\is_array($data['data'] ?? null)) {
 				return [null, 'Walks Manager could not be reached just now. Please try again later.'];
-			}
-
-			@file_put_contents($cache, $body);
-		}
-
-		foreach ((array) (json_decode($body, true)['data'] ?? []) as $w) {
-			if (trim((string) ($w['id'] ?? '')) !== $walkId) {
-				continue;
 			}
 
 			$place = static function ($loc): ?array {
@@ -450,20 +487,37 @@ final class Recordings
 					? [(float) $loc['latitude'], (float) $loc['longitude']]
 					: null;
 			};
-			$starts = array_values(array_filter([$place($w['start_location'] ?? null), $place($w['meeting_location'] ?? null)]));
-			$end = $place($w['end_location'] ?? null);
+			$items = [];
 
-			return [[
-				'id' => $walkId,
-				'title' => trim((string) ($w['title'] ?? '')),
-				'date' => substr((string) ($w['start_date_time'] ?? ''), 0, 10),
-				'group' => (string) ($w['group_code'] ?? ''),
-				'starts' => $starts,
-				'finishes' => $end ? [$end] : $starts,
-			], ''];
+			foreach ($data['data'] as $w) {
+				$id = trim((string) ($w['id'] ?? ''));
+
+				if ($id === '') {
+					continue;
+				}
+
+				$start = $place($w['start_location'] ?? null);
+				$meeting = $place($w['meeting_location'] ?? null);
+				$end = $place($w['end_location'] ?? null);
+				$circular = strtolower((string) ($w['shape'] ?? '')) !== 'linear';
+				$starts = array_values(array_filter([$start, $meeting]));
+
+				$items[$id] = [
+					'id' => $id,
+					'title' => trim((string) ($w['title'] ?? '')),
+					'date' => substr((string) ($w['start_date_time'] ?? ''), 0, 10),
+					'group' => (string) ($w['group_code'] ?? ''),
+					'cancelled' => strtolower((string) ($w['status'] ?? '')) === 'cancelled',
+					'starts' => $starts,
+					// A circular walk finishes at its start; a linear one at its end (none: refused).
+					'finishes' => $circular ? ($start ? [$start] : $starts) : ($end ? [$end] : []),
+				];
+			}
+
+			@file_put_contents($cache, json_encode($items));
 		}
 
-		return [null, ''];
+		return [$items[$walkId] ?? null, ''];
 	}
 
 	// ---------------------------------------------------------------- data
@@ -477,7 +531,8 @@ final class Recordings
 			return null;
 		}
 
-		$file = 'walked-' . $walk['id'] . '-' . bin2hex(random_bytes(4)) . '.gpx';
+		// A long random part: a recording that isn't shown can't be found by guessing its name.
+		$file = 'walked-' . $walk['id'] . '-' . bin2hex(random_bytes(12)) . '.gpx';
 		$xml = $this->routes->withElevation(self::gpx($walk['title'], $points));
 
 		if (@file_put_contents($dir . '/' . $file, $xml) === false) {
@@ -486,9 +541,16 @@ final class Recordings
 
 		$now = Factory::getDate()->toSql();
 
+		$old = null;
+
 		try {
 			$this->ensureTable();
-			$old = $this->mine($walk['id'], (int) $user->id);
+			$this->db->transactionStart();
+			// Locks this member's row (or its place) so two uploads at once can't both replace it.
+			$old = $this->db->setQuery(
+				'SELECT * FROM ' . $this->db->quoteName(self::TABLE) . ' WHERE `walk_id` = ' . $this->db->quote($walk['id'])
+				. ' AND `user_id` = ' . (int) $user->id . ' FOR UPDATE'
+			)->loadObject() ?: null;
 			$row = (object) [
 				'walk_id' => $walk['id'],
 				'user_id' => (int) $user->id,
@@ -505,7 +567,6 @@ final class Recordings
 			if ($old) {
 				$row->id = (int) $old->id;
 				$this->db->updateObject(self::TABLE, $row, 'id');
-				$this->routes->deleteFile((string) $old->file);
 			} else {
 				$row->uploaded = $now;
 				$row->pinned = 0;
@@ -514,13 +575,24 @@ final class Recordings
 			}
 
 			$this->chooseShown($walk['id']);
-
-			return $this->mine($walk['id'], (int) $user->id);
+			$this->db->transactionCommit();
 		} catch (\Throwable $e) {
+			try {
+				$this->db->transactionRollback();
+			} catch (\Throwable $ignored) {
+			}
+
 			@unlink($dir . '/' . $file);
 
 			return null;
 		}
+
+		// The replaced file goes only once the new one is safely recorded.
+		if ($old) {
+			$this->routes->deleteFile((string) $old->file);
+		}
+
+		return $this->mine($walk['id'], (int) $user->id);
 	}
 
 	/**
@@ -568,6 +640,8 @@ final class Recordings
 		}
 
 		$this->tableChecked = true;
+		// The planned routes table too: the members' page and the lookup join it.
+		$this->routes->ensureTable();
 		$this->db->setQuery(
 			'CREATE TABLE IF NOT EXISTS ' . $this->db->quoteName(self::TABLE) . ' ('
 			. '`id` INT NOT NULL AUTO_INCREMENT,'
@@ -799,6 +873,8 @@ final class Recordings
 		if ($action === 'delete') {
 			$this->remove($row);
 			$this->app->enqueueMessage('The recorded route has been deleted.', 'message');
+		} elseif ($action === 'show' && $this->routes->hasRoute((string) $row->walk_id)) {
+			$this->app->enqueueMessage('That walk has a planned route, which is shown instead of any recording.', 'warning');
 		} elseif ($action === 'show') {
 			$this->db->setQuery(
 				'UPDATE ' . $this->db->quoteName(self::TABLE) . ' SET `pinned` = (`id` = ' . (int) $row->id . ')'

@@ -185,7 +185,8 @@ final class PastWalks
 			return '';
 		}
 
-		$has = (array) json_decode($this->routes->lookupJson(), true);
+		// Planned routes only: a new upload replaces a planned route, never a member's recording.
+		$has = (array) json_decode($this->routes->lookupJson(false), true);
 		$walks = [];
 
 		foreach ($items as $item) {
