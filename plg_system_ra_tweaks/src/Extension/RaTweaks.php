@@ -17,6 +17,7 @@ use Joomla\CMS\Plugin\CMSPlugin;
 use Joomla\Database\DatabaseInterface;
 use Joomla\Event\SubscriberInterface;
 use Ramblerseastcheshire\Plugin\System\RaTweaks\Forms\EmailCaptcha;
+use Ramblerseastcheshire\Plugin\System\RaTweaks\Routes\Recordings;
 use Ramblerseastcheshire\Plugin\System\RaTweaks\Routes\WalkRoutes;
 use Ramblerseastcheshire\Plugin\System\RaTweaks\Walks\PastWalks;
 
@@ -76,6 +77,11 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 		}
 	}
 
+	private function recordings(WalkRoutes $routes): Recordings
+	{
+		return new Recordings($this->params, $this->app, Factory::getContainer()->get(DatabaseInterface::class), $routes);
+	}
+
 	private function walkRoutes(): WalkRoutes
 	{
 		return new WalkRoutes($this->params, $this->app, Factory::getContainer()->get(DatabaseInterface::class));
@@ -106,6 +112,10 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 
 		$routes = $this->walkRoutes();
 		$item->text = $routes->replaceShortcodes($item->text);
+
+		if (strpos($item->text, Recordings::SHORTCODE) !== false) {
+			$item->text = $this->recordings($routes)->replaceShortcode($item->text);
+		}
 
 		if (strpos($item->text, PastWalks::SHORTCODE) !== false) {
 			$item->text = (new PastWalks($this->params, Factory::getContainer()->get(DatabaseInterface::class), $routes))->replaceShortcode($item->text);
@@ -157,8 +167,18 @@ final class RaTweaks extends CMSPlugin implements SubscriberInterface
 
 		$routes = $this->walkRoutes();
 		$result = '{}';
+		$task = $this->app->getInput()->getCmd('task', '');
 
-		if ($routes->enabled() && $this->app->getInput()->getCmd('task', '') === 'routes') {
+		// The Ramblers Tools app: these answer with their own status and JSON, then stop.
+		if ($task === 'recording') {
+			$this->recordings($routes)->uploadResponse();
+		}
+
+		if ($task === 'recording_allowed') {
+			$this->recordings($routes)->allowedResponse();
+		}
+
+		if ($routes->enabled() && $task === 'routes') {
 			$result = $routes->lookupJson();
 		}
 

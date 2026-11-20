@@ -25,7 +25,7 @@ use Joomla\Registry\Registry;
 final class WalkRoutes
 {
 	private const TABLE = '#__ra_tweaks_walk_routes';
-	private const FOLDER = 'images/walk-routes';
+	public const FOLDER = 'images/walk-routes';
 
 	private Registry $params;
 	private CMSApplicationInterface $app;
@@ -71,7 +71,8 @@ final class WalkRoutes
 	{
 		$this->tidyOncePerDay();
 
-		$map = [];
+		// A walk with no planned route offers the route walked, when a member recorded one.
+		$map = (new Recordings($this->params, $this->app, $this->db, $this))->shownFiles();
 
 		try {
 			$this->ensureTable();
@@ -84,7 +85,7 @@ final class WalkRoutes
 				$map[(string) $row->walk_id] = (string) $row->file;
 			}
 		} catch (\Throwable $e) {
-			$map = [];
+			// The recordings, if any, are still offered.
 		}
 
 		return json_encode((object) $map, JSON_UNESCAPED_SLASHES) ?: '{}';
@@ -139,10 +140,27 @@ final class WalkRoutes
 			return '<p>No walk was chosen. Open a walk from the walks list and choose View route.</p>';
 		}
 
-		$row = $this->find($id);
+		// The planned route, unless the route walked is asked for or is all there is.
+		$planned = $this->find($id);
+		$walked = (new Recordings($this->params, $this->app, $this->db, $this))->shownFor($id);
+		$wantWalked = $this->app->getInput()->getCmd('route', '') === 'walked';
+		$row = ($wantWalked && $walked) || !$planned ? $walked : $planned;
 
 		if ($row === null) {
 			return '<p>Sorry, there is no route for that walk. It may have been removed after the walk took place.</p>';
+		}
+
+		$isWalked = $row === $walked;
+		$other = '';
+
+		if ($planned && $walked) {
+			$uri = clone Uri::getInstance();
+			$uri->setFragment('');
+			$uri->setVar('walk', $id);
+			$isWalked ? $uri->delVar('route') : $uri->setVar('route', 'walked');
+			$link = $uri->toString(['path', 'query']);
+			$other = '<p class="ra-walk-route-other"><a href="' . $this->e($link) . '">'
+				. ($isWalked ? 'See the planned route' : 'See the route walked') . '</a></p>';
 		}
 
 		if (!class_exists('RLeafletGpxMap')) {
@@ -157,6 +175,12 @@ final class WalkRoutes
 			$html .= '<p class="ra-walk-route-title"><strong>' . $this->e((string) $row->title) . '</strong>'
 				. ($when !== '' ? ' &ndash; ' . $this->e($when) : '') . '</p>';
 		}
+
+		if ($isWalked) {
+			$html .= '<p class="ra-walk-route-kind">Route walked, recorded on the day with the Ramblers Tools app.</p>';
+		}
+
+		$html .= $other;
 
 		ob_start();
 
@@ -514,6 +538,11 @@ JS . '</script>';
 	}
 
 	/** Returns '' when the upload is a usable GPX file, otherwise a message for the leader. */
+	public function checkUpload(array $upload): string
+	{
+		return $this->validateUpload($upload);
+	}
+
 	private function validateUpload(array $upload): string
 	{
 		if (empty($upload['tmp_name']) || (int) ($upload['error'] ?? 0) !== UPLOAD_ERR_OK) {
@@ -708,7 +737,7 @@ JS . '</script>';
 		$this->deleteFile((string) $row->file);
 	}
 
-	private function deleteFile(string $file): void
+	public function deleteFile(string $file): void
 	{
 		if ($file !== '' && basename($file) === $file) {
 			@unlink(JPATH_ROOT . '/' . self::FOLDER . '/' . $file);
