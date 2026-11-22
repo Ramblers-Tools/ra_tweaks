@@ -501,7 +501,10 @@ final class PastWalks
 		for ($year = $first; $year <= $last; $year++) {
 			$row = $this->load($groups, $year);
 
-			if ($row === null || (!(int) $row->complete && strtotime((string) $row->fetched . ' UTC') < time() - 86400)) {
+			// An open year is fetched again at the first visit each day (UK time), so yesterday's
+			// walks are there from the morning after, not up to two days later.
+			if ($row === null || (!(int) $row->complete
+				&& (new \DateTimeImmutable((string) $row->fetched, new \DateTimeZone('UTC')))->setTimezone($tz) < $today)) {
 				$fresh = $this->fetchYear($groups, $year, $yesterday);
 
 				if ($fresh !== null) {
