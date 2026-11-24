@@ -7,7 +7,7 @@
 	<license>GNU General Public License version 3 or later; see LICENSE.txt</license>
 	<authorEmail>webmaster@bigley.me.uk</authorEmail>
 	<authorUrl>https://ramblerseastcheshire.org.uk/</authorUrl>
-	<version>1.9.0</version>
+	<version>1.10.0</version>
 	<description>PLG_SYSTEM_RA_TWEAKS_XML_DESCRIPTION</description>
 	<namespace path="src">Ramblerseastcheshire\Plugin\System\RaTweaks</namespace>
 	<files>
@@ -325,6 +325,37 @@
 					min="2000"
 					max="2100"
 					filter="integer"
+				/>
+				<field
+					name="past_collection_name"
+					type="text"
+					label="PLG_SYSTEM_RA_TWEAKS_FIELD_PAST_COLLECTION_NAME_LABEL"
+					description="PLG_SYSTEM_RA_TWEAKS_FIELD_PAST_COLLECTION_NAME_DESC"
+					default=""
+					maxlength="80"
+				/>
+				<field
+					name="past_collection_folder"
+					type="text"
+					label="PLG_SYSTEM_RA_TWEAKS_FIELD_PAST_COLLECTION_FOLDER_LABEL"
+					description="PLG_SYSTEM_RA_TWEAKS_FIELD_PAST_COLLECTION_FOLDER_DESC"
+					default=""
+					hint="images/annecollectionofwalks"
+				/>
+				<field
+					name="past_collection_links"
+					type="text"
+					label="PLG_SYSTEM_RA_TWEAKS_FIELD_PAST_COLLECTION_LINKS_LABEL"
+					description="PLG_SYSTEM_RA_TWEAKS_FIELD_PAST_COLLECTION_LINKS_DESC"
+					default=""
+					hint="images/walk-collection-links.json"
+				/>
+				<field
+					name="past_collection_colour"
+					type="color"
+					label="PLG_SYSTEM_RA_TWEAKS_FIELD_PAST_COLLECTION_COLOUR_LABEL"
+					description="PLG_SYSTEM_RA_TWEAKS_FIELD_PAST_COLLECTION_COLOUR_DESC"
+					default="#1E5BD8"
 				/>
 			</fieldset>
 			<fieldset

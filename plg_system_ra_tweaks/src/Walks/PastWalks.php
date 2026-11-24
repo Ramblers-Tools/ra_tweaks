@@ -54,6 +54,17 @@ final class PastWalks
 	 */
 	public static ?array $photos = null;
 
+	/**
+	 * Walk id => links to the old GPX routes it follows (see Collection), for the template's
+	 * badge, the tick box and the popup's buttons.
+	 *
+	 * @var array<string,array<int,string>>|null
+	 */
+	public static ?array $collection = null;
+
+	/** The collection's name ("A Collection of Walks"), for the badge's label. */
+	public static string $collectionName = '';
+
 	private Registry $params;
 	private DatabaseInterface $db;
 	private WalkRoutes $routes;
@@ -128,6 +139,15 @@ final class PastWalks
 			self::$photos = [];
 		}
 
+		$collection = new Collection($this->params);
+		self::$collectionName = $collection->name();
+
+		try {
+			self::$collection = $collection->forWalks($items);
+		} catch (\Throwable $e) {
+			self::$collection = [];
+		}
+
 		ob_start();
 
 		try {
@@ -141,7 +161,51 @@ final class PastWalks
 		}
 
 		return $this->searchBox($items) . (string) ob_get_clean() . $this->keepPastScript() . $this->gpxButtons($items)
-			. $this->photosPopupScript();
+			. $this->photosPopupScript() . $this->collectionPopupScript();
+	}
+
+	/**
+	 * The collection's badge: a small round mark with an open book. The template puts it on
+	 * the corner of a walk's date; the tick box uses it as its key.
+	 */
+	public static function collectionBadge(bool $key = false): string
+	{
+		$label = htmlspecialchars('In ' . self::$collectionName, ENT_QUOTES, 'UTF-8');
+
+		return '<span class="ra-collection-badge' . ($key ? ' ra-collection-badge--key' : '') . '"'
+			. ($key ? ' aria-hidden="true"' : ' role="img" aria-label="' . $label . '" title="' . $label . '"') . '>'
+			. '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'
+			. '<path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z"/><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg></span>';
+	}
+
+	/**
+	 * Buttons in the walk popup (beside View route, Photos and Close) for each old route the walk
+	 * follows in the collection: "Collection route", "Collection route 2" ... Each downloads the
+	 * old GPX file. Works like the Photos button.
+	 */
+	private function collectionPopupScript(): string
+	{
+		if (!self::$collection) {
+			return '';
+		}
+
+		$flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES;
+		$json = (string) json_encode((object) self::$collection, $flags);
+		$title = (string) json_encode('The old route from ' . self::$collectionName . ' (GPX file)', $flags);
+
+		return '<script>(function(){var routes=' . $json . ',title=' . $title . ';'
+			. 'function add(id,tries){var header=document.querySelector(".js-modal .ra-modal-header");'
+			. 'if(!header){if(tries<40){window.setTimeout(function(){add(id,tries+1);},100);}return;}'
+			. 'if(header.querySelector(".ra-tweaks-collection-button")){return;}'
+			. 'var first=header.firstChild;(routes[id]||[]).forEach(function(url,i){var a=document.createElement("a");'
+			. 'a.className="link-button tiny cloudy ra-tweaks-collection-button";a.textContent=i?"Collection route "+(i+1):"Collection route";'
+			. 'a.href=url;a.setAttribute("download","");a.title=title;a.style.marginRight="0.5em";header.insertBefore(a,first);});}'
+			. 'function wrap(){if(!window.ra||!ra.walk||typeof ra.walk.displayWalkID!=="function"){return false;}'
+			. 'if(ra.walk.displayWalkID.raCollectionWrapped){return true;}var original=ra.walk.displayWalkID;'
+			. 'var wrapped=function(event,id){var result=original.apply(this,arguments);if(routes[String(id)]){add(String(id),0);}return result;};'
+			. 'for(var k in original){if(Object.prototype.hasOwnProperty.call(original,k)){wrapped[k]=original[k];}}'
+			. 'wrapped.raCollectionWrapped=true;ra.walk.displayWalkID=wrapped;return true;}'
+			. 'window.addEventListener("load",function(){var n=0;(function again(){if(!wrap()&&n++<20){window.setTimeout(again,250);}})();});})();</script>';
 	}
 
 	/**
@@ -350,7 +414,7 @@ final class PastWalks
 			// The search box: after the library's own filters, a walk must also contain every
 			// word typed (see searchBox()).
 			. 'function searchable(list){var own=list.setDisplayFilter;list.setDisplayFilter=function(){own.apply(list,arguments);'
-			. 'var words=window.raPastWalksSearch||[],sets=[];if(window.raPastWalksGpxOnly){sets.push(window.raPastWalksGpx||{});}if(window.raPastWalksPhotosOnly){sets.push(window.raPastWalksPhotos||{});}'
+			. 'var words=window.raPastWalksSearch||[],sets=[];if(window.raPastWalksGpxOnly){sets.push(window.raPastWalksGpx||{});}if(window.raPastWalksPhotosOnly){sets.push(window.raPastWalksPhotos||{});}if(window.raPastWalksCollectionOnly){sets.push(window.raPastWalksCollection||{});}'
 			. 'if(words.length||sets.length){'
 			. 'list.events.forEach(function(e){if(!e._displayFiltered){return;}'
 			. 'for(var s=0;s<sets.length;s++){if(!(e.admin&&sets[s][e.admin.id])){e._displayFiltered=false;return;}}'
@@ -429,6 +493,7 @@ final class PastWalks
 		}
 
 		$withPhotos = array_fill_keys(array_keys(self::$photos ?? []), 1);
+		$inCollection = array_fill_keys(array_keys(self::$collection ?? []), 1);
 
 		$tick = static function (string $id, string $text, int $count): string {
 			return $count < 1 ? '' : '<div class="form-check ra-past-walks__gpx">'
@@ -443,19 +508,39 @@ final class PastWalks
 			. ' placeholder="Leader, place, postcode or walk name">'
 			. $tick('ra-past-walks-gpx', 'Only walks with a GPX route', \count($withRoute))
 			. $tick('ra-past-walks-photos', 'Only walks with photos', \count($withPhotos))
+			. $tick('ra-past-walks-collection', 'Only walks in ' . htmlspecialchars(self::$collectionName, ENT_QUOTES, 'UTF-8') . ' ' . self::collectionBadge(true), \count($inCollection))
 			. '<p class="ra-past-walks__count" id="ra-past-walks-count" role="status" aria-live="polite">' . \count($items) . ' past walks</p>'
 			. '</div>'
 			. '<script>(function(){window.raPastWalksGpx=' . json_encode((object) $withRoute) . ';'
 			. 'window.raPastWalksPhotos=' . json_encode((object) $withPhotos) . ';'
+			. 'window.raPastWalksCollection=' . json_encode((object) $inCollection) . ';'
 			. 'var box=document.getElementById("ra-past-walks-q"),tick=document.getElementById("ra-past-walks-gpx"),'
-			. 'pics=document.getElementById("ra-past-walks-photos"),timer=null;'
+			. 'pics=document.getElementById("ra-past-walks-photos"),coll=document.getElementById("ra-past-walks-collection"),timer=null;'
 			. 'function run(){var q=box.value.toLowerCase().replace(/\\s+/g," ").trim();'
 			. 'window.raPastWalksSearch=q?q.split(" "):[];window.raPastWalksGpxOnly=!!(tick&&tick.checked);'
-			. 'window.raPastWalksPhotosOnly=!!(pics&&pics.checked);'
+			. 'window.raPastWalksPhotosOnly=!!(pics&&pics.checked);window.raPastWalksCollectionOnly=!!(coll&&coll.checked);'
 			. 'document.dispatchEvent(new Event("reDisplayWalks"));'
 			. '}'
 			. 'box.addEventListener("input",function(){window.clearTimeout(timer);timer=window.setTimeout(run,250);});'
-			. 'if(tick){tick.addEventListener("change",run);}if(pics){pics.addEventListener("change",run);}})();</script>';
+			. 'if(tick){tick.addEventListener("change",run);}if(pics){pics.addEventListener("change",run);}'
+			// ?collection=1 (from the collection's own page) opens with that box ticked.
+			. 'if(coll){coll.addEventListener("change",run);if(/[?&]collection=1(&|$)/.test(location.search)){coll.checked=true;'
+			. 'window.raPastWalksCollectionOnly=true;window.addEventListener("load",function(){window.setTimeout(run,0);});}}})();</script>'
+			. ($inCollection ? $this->collectionStyle() : '');
+	}
+
+	/** The badge's look: on the corner of a walk's date, and as the tick box's key. */
+	private function collectionStyle(): string
+	{
+		$colour = (string) $this->params->get('past_collection_colour', '#1E5BD8');
+		$colour = preg_match('/^#[0-9a-fA-F]{3,8}$/', $colour) ? $colour : '#1E5BD8';
+
+		return '<style>.ra-collection-badge{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;'
+			. 'background:' . $colour . ';color:#fff;box-shadow:0 0 0 2px #fff}'
+			. '.ra-collection-badge svg{width:15px;height:15px}'
+			. '.ecr-walk__date{position:relative}.ecr-walk__date .ra-collection-badge{position:absolute;right:-10px;top:14px}'
+			. '.ra-collection-badge--key{display:inline-flex;vertical-align:middle;margin:0 2px 0 4px;box-shadow:none;width:22px;height:22px}'
+			. '.ra-collection-badge--key svg{width:13px;height:13px}</style>';
 	}
 
 	/**
