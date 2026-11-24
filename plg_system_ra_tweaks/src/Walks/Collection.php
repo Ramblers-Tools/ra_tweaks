@@ -51,6 +51,39 @@ final class Collection
 		return $this->page;
 	}
 
+	/** The GPX folder, from the site's top folder. */
+	public function folder(): string
+	{
+		return $this->folder;
+	}
+
+	/**
+	 * The old GPX files (names in the folder) that one walk follows, in the links file's order.
+	 * Files no longer in the folder are left out.
+	 *
+	 * @return array<int,string>
+	 */
+	public function files(string $walkId): array
+	{
+		if (!$this->enabled()) {
+			return [];
+		}
+
+		$file = JPATH_ROOT . '/' . $this->links;
+		$links = is_file($file) ? json_decode((string) file_get_contents($file), true) : null;
+		$out = [];
+
+		foreach (\is_array($links) ? (array) ($links[$walkId] ?? []) : [] as $name) {
+			$name = basename((string) $name);
+
+			if (preg_match('/\.gpx$/i', $name) && is_file(JPATH_ROOT . '/' . $this->folder . '/' . $name)) {
+				$out[] = $name;
+			}
+		}
+
+		return $out;
+	}
+
 	/**
 	 * Walk id => links to the old routes it follows, for the walks given. Files that are no
 	 * longer in the folder are left out, and so is a walk left with none.

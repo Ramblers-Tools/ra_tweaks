@@ -21,6 +21,7 @@ namespace Ramblerseastcheshire\Plugin\System\RaTweaks\Walks;
 
 use Joomla\CMS\Factory;
 use Joomla\CMS\Http\HttpFactory;
+use Joomla\CMS\Router\Route;
 use Joomla\CMS\Session\Session;
 use Joomla\CMS\Uri\Uri;
 use Joomla\Database\DatabaseInterface;
@@ -179,9 +180,11 @@ final class PastWalks
 	}
 
 	/**
-	 * Buttons in the walk popup (beside View route, Photos and Close) for each old route the walk
-	 * follows in the collection: "Collection route", "Collection route 2" ... Each downloads the
-	 * old GPX file. Works like the Photos button.
+	 * The walk popup's buttons for a walk in the route collection. A walk with no route of its
+	 * own gets "View route" (the route page, which then shows its old route) and "Download GPX",
+	 * like a walk with an uploaded route, then "Route 2", "Route 3" ... for any further old
+	 * routes. A walk with a route of its own (uploaded, or recorded with the app) shows only
+	 * that one: it keeps the badge, but no old-route buttons. Works like the Photos button.
 	 */
 	private function collectionPopupScript(): string
 	{
@@ -189,20 +192,45 @@ final class PastWalks
 			return '';
 		}
 
-		$flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES;
-		$json = (string) json_encode((object) self::$collection, $flags);
-		$title = (string) json_encode('The old route from ' . self::$collectionName . ' (GPX file)', $flags);
+		$page = trim((string) $this->params->get('routes_page', ''));
+		$own = $this->routes->enabled() ? (array) json_decode($this->routes->lookupJson(), true) : [];
+		$walks = [];
 
-		return '<script>(function(){var routes=' . $json . ',title=' . $title . ';'
+		foreach (self::$collection as $id => $files) {
+			$view = [];
+
+			if ($page !== '') {
+				foreach (array_keys($files) as $i) {
+					$view[] = Route::_($page . (strpos($page, '?') === false ? '?' : '&') . 'walk=' . rawurlencode((string) $id) . '&old=' . ($i + 1));
+				}
+			}
+
+			if (!isset($own[$id])) {
+				$walks[$id] = ['gpx' => $files, 'view' => $view];
+			}
+		}
+
+		if (!$walks) {
+			return '';
+		}
+
+		$flags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES;
+		$title = (string) json_encode('An older route of this walk, from ' . self::$collectionName, $flags);
+
+		return '<script>(function(){var walks=' . json_encode((object) $walks, $flags) . ',title=' . $title . ';'
+			. 'function button(text,href,download){var a=document.createElement("a");'
+			. 'a.className="link-button tiny cloudy ra-tweaks-collection-button";a.textContent=text;a.href=href;'
+			. 'if(download){a.setAttribute("download","");}a.title=title;a.style.marginRight="0.5em";return a;}'
 			. 'function add(id,tries){var header=document.querySelector(".js-modal .ra-modal-header");'
 			. 'if(!header){if(tries<40){window.setTimeout(function(){add(id,tries+1);},100);}return;}'
 			. 'if(header.querySelector(".ra-tweaks-collection-button")){return;}'
-			. 'var first=header.firstChild;(routes[id]||[]).forEach(function(url,i){var a=document.createElement("a");'
-			. 'a.className="link-button tiny cloudy ra-tweaks-collection-button";a.textContent=i?"Collection route "+(i+1):"Collection route";'
-			. 'a.href=url;a.setAttribute("download","");a.title=title;a.style.marginRight="0.5em";header.insertBefore(a,first);});}'
+			. 'var w=walks[id],first=header.firstChild,list=[];'
+			. 'if(w.view[0]){list.push(button("View route",w.view[0]));}list.push(button("Download GPX",w.gpx[0],true));'
+			. 'for(var i=1;i<w.gpx.length;i++){list.push(button("Route "+(i+1),w.view[i]||w.gpx[i],!w.view[i]));}'
+			. 'list.forEach(function(a){header.insertBefore(a,first);});}'
 			. 'function wrap(){if(!window.ra||!ra.walk||typeof ra.walk.displayWalkID!=="function"){return false;}'
 			. 'if(ra.walk.displayWalkID.raCollectionWrapped){return true;}var original=ra.walk.displayWalkID;'
-			. 'var wrapped=function(event,id){var result=original.apply(this,arguments);if(routes[String(id)]){add(String(id),0);}return result;};'
+			. 'var wrapped=function(event,id){var result=original.apply(this,arguments);if(walks[String(id)]){add(String(id),0);}return result;};'
 			. 'for(var k in original){if(Object.prototype.hasOwnProperty.call(original,k)){wrapped[k]=original[k];}}'
 			. 'wrapped.raCollectionWrapped=true;ra.walk.displayWalkID=wrapped;return true;}'
 			. 'window.addEventListener("load",function(){var n=0;(function again(){if(!wrap()&&n++<20){window.setTimeout(again,250);}})();});})();</script>';

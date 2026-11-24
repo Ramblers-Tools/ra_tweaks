@@ -17,6 +17,7 @@ use Joomla\CMS\Application\CMSApplicationInterface;
 use Joomla\CMS\Factory;
 use Joomla\CMS\Http\HttpFactory;
 use Joomla\CMS\Session\Session;
+use Joomla\CMS\Router\Route;
 use Joomla\CMS\Uri\Uri;
 use Joomla\CMS\User\User;
 use Joomla\Database\DatabaseInterface;
@@ -141,11 +142,14 @@ final class WalkRoutes
 		}
 
 		// The planned route always wins; a members' recording is shown only for a walk without one.
-		$planned = $this->find($id);
-		$row = $planned ?: (new Recordings($this->params, $this->app, $this->db, $this))->shownFor($id);
+		// &old=N shows the walk's Nth old route from the route collection (A Collection of Walks),
+		// which is also shown for a walk with neither.
+		$old = (int) $this->app->getInput()->getInt('old', 0);
+		$planned = $old > 0 ? null : $this->find($id);
+		$row = $old > 0 ? null : ($planned ?: (new Recordings($this->params, $this->app, $this->db, $this))->shownFor($id));
 
 		if ($row === null) {
-			return '<p>Sorry, there is no route for that walk. It may have been removed after the walk took place.</p>';
+			return $this->renderOldRoute($id, max(1, $old));
 		}
 
 		$isWalked = $planned === null;
@@ -175,6 +179,53 @@ final class WalkRoutes
 			$map->linecolour = '#782327';
 			$map->addDownloadLink = 'Public';
 			$map->displayPath($relative);
+		} catch (\Throwable $e) {
+			ob_end_clean();
+
+			return $html . '<p>Sorry, the route could not be shown.</p>';
+		}
+
+		return $html . $this->wholeZoomScript() . ob_get_clean() . $this->defaultMapScript() . $this->hideEmptyTimeScript();
+	}
+
+	/**
+	 * A walk's old route from the route collection (see Walks\Collection): the Nth of the old
+	 * GPX files linked to the walk, with links to the others when there are more.
+	 */
+	private function renderOldRoute(string $id, int $n): string
+	{
+		$collection = new \Ramblerseastcheshire\Plugin\System\RaTweaks\Walks\Collection($this->params);
+		$files = $collection->files($id);
+
+		if (!$files || !class_exists('RLeafletGpxMap')) {
+			return '<p>Sorry, there is no route for that walk. It may have been removed after the walk took place.</p>';
+		}
+
+		$n = min($n, \count($files));
+		$page = trim((string) $this->params->get('routes_page', ''));
+		$html = '<p class="ra-walk-route-kind">An older route of this walk, from ' . $this->e($collection->name()) . ': '
+			. $this->e(preg_replace('/\.gpx$/i', '', $files[$n - 1])) . '.</p>';
+
+		if (\count($files) > 1) {
+			$links = [];
+
+			foreach ($files as $i => $name) {
+				$label = 'Route ' . ($i + 1);
+				$links[] = $i + 1 === $n || $page === ''
+					? '<strong>' . $label . '</strong>'
+					: '<a href="' . $this->e(Route::_($this->routeUrl($page, $id) . '&old=' . ($i + 1))) . '">' . $label . '</a>';
+			}
+
+			$html .= '<p class="ra-walk-route-others">This walk follows ' . \count($files) . ' old routes: ' . implode(' &middot; ', $links) . '</p>';
+		}
+
+		ob_start();
+
+		try {
+			$map = new \RLeafletGpxMap();
+			$map->linecolour = '#782327';
+			$map->addDownloadLink = 'Public';
+			$map->displayPath($collection->folder() . '/' . $files[$n - 1]);
 		} catch (\Throwable $e) {
 			ob_end_clean();
 
